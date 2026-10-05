@@ -1,0 +1,15 @@
+[Unit]
+Description=HoatzinGenz Security & Diagnostic Protection Agent
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/diagnostic-agent
+ExecStart=/opt/diagnostic-agent/bin/diagnostic-agent -config /etc/diagnostic-agent/config.yaml
+Restart=always
+RestartSec=5s
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

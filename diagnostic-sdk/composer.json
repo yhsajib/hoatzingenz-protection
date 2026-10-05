@@ -1,0 +1,26 @@
+{
+    "name": "hoatzingenz/diagnostic-sdk",
+    "description": "Production Diagnostic and Security Protection SDK for PHP Applications",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Hoatzingenz\\Diagnostic\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Hoatzingenz\\Diagnostic\\Tests\\": "tests/"
+        }
+    },
+    "require": {
+        "php": ">=7.4",
+        "ext-json": "*",
+        "ext-curl": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.5 || ^10.0"
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

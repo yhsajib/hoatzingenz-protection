@@ -1,0 +1,15 @@
+[Unit]
+Description=HoatzinGenz Protection Server & Control Panel API Engine
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/hoatzingenz-protection
+ExecStart=/opt/hoatzingenz-protection/bin/server -port 8080 -db /var/lib/hoatzingenz/controlpanel.db
+Restart=always
+RestartSec=5s
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
