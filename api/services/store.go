@@ -87,6 +87,27 @@ func NewMemoryStore() *MemoryStore {
 			RemediationSteps: []string{"Add index: CREATE INDEX idx_orders_status_created ON orders(status, created_at DESC);", "Optimize query SELECT fields"},
 			CreatedAt:        time.Now().Add(-90 * time.Minute),
 		},
+		models.ErrorDiagnostic{
+			ID:               104,
+			IncidentID:       "inc_01H89X204WP",
+			RequestID:        "req_7721A04F",
+			DomainName:       "wp-pro-success.local",
+			ErrorType:        "PHP_FATAL",
+			Severity:         "CRITICAL",
+			Category:         "Reliability",
+			Message:          "Fatal error: Uncaught Error: Call to undefined function wc_get_order() in /var/www/html/wp-pro-success.local/wp-content/plugins/custom-gateway/gateway.php:35",
+			File:             "/var/www/html/wp-pro-success.local/wp-content/plugins/custom-gateway/gateway.php",
+			Line:             35,
+			StackTrace:       "#0 /var/www/html/wp-pro-success.local/trigger_error.php(6): CustomPaymentGateway->processPayment(Array)\n#1 /var/www/html/wp-pro-success.local/wp-content/themes/twentytwentyfour/functions.php(102): CustomPaymentGateway->processPayment(Array)\n#2 /var/www/html/wp-pro-success.local/wp-includes/class-wp-hook.php(324): {closure}()\n#3 /var/www/html/wp-pro-success.local/wp-includes/class-wp-hook.php(348): WP_Hook->apply_filters()\n#4 /var/www/html/wp-pro-success.local/wp-includes/plugin.php(517): WP_Hook->do_action()\n#5 /var/www/html/wp-pro-success.local/wp-settings.php(695): do_action('init')\n#6 /var/www/html/wp-pro-success.local/wp-config.php(32): require_once('/var/www/html/wp-pro-success.local/wp-settings.php')\n#7 /var/www/html/wp-pro-success.local/index.php(17): require('/var/www/html/wp-pro-success.local/wp-blog-header.php')\n#8 {main}",
+			ConfidenceScore:  0.99,
+			AIRootCause:      "WooCommerce order API function `wc_get_order()` was called inside payment gateway execution before WooCommerce plugin was verified as active or before the 'woocommerce_loaded' lifecycle hook was dispatched.",
+			RemediationSteps: []string{
+				"Add `function_exists('wc_get_order')` guard condition before attempting to retrieve orders",
+				"Ensure payment gateway initialization is deferred until the `plugins_loaded` or `woocommerce_loaded` action hook",
+				"Activate WooCommerce plugin or declare proper plugin dependency headers in gateway manifest",
+			},
+			CreatedAt:        time.Now().Add(-5 * time.Minute),
+		},
 	)
 
 	// Seed sample initial website

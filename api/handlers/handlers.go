@@ -1068,7 +1068,52 @@ func (h *APIHandler) HandleErrorDiagnostics(w http.ResponseWriter, r *http.Reque
 
 			var inc models.ErrorDiagnostic
 			switch errType {
+			case "WP_PRO_FATAL":
+				inc = models.ErrorDiagnostic{
+					IncidentID:      fmt.Sprintf("inc_%06d_WP_PRO", time.Now().Unix()%1000000),
+					RequestID:       fmt.Sprintf("req_%x", time.Now().UnixNano()%0xFFFFFFF),
+					DomainName:      "wp-pro-success.local",
+					ErrorType:       "PHP_FATAL",
+					Severity:        "CRITICAL",
+					Category:        "Reliability",
+					Message:         "Fatal error: Uncaught Error: Call to undefined function wc_get_order() in /var/www/html/wp-pro-success.local/wp-content/plugins/custom-gateway/gateway.php:35",
+					File:            "/var/www/html/wp-pro-success.local/wp-content/plugins/custom-gateway/gateway.php",
+					Line:            35,
+					StackTrace:      "#0 /var/www/html/wp-pro-success.local/trigger_error.php(6): CustomPaymentGateway->processPayment(Array)\n#1 /var/www/html/wp-pro-success.local/wp-content/themes/twentytwentyfour/functions.php(102): CustomPaymentGateway->processPayment(Array)\n#2 /var/www/html/wp-pro-success.local/wp-includes/class-wp-hook.php(324): {closure}()\n#3 /var/www/html/wp-pro-success.local/wp-settings.php(695): do_action('init')\n#4 /var/www/html/wp-pro-success.local/index.php(17): require('/var/www/html/wp-pro-success.local/wp-blog-header.php')\n#5 {main}",
+					ConfidenceScore: 0.99,
+					AIRootCause:     "WooCommerce order API function wc_get_order() was called inside payment gateway execution before WooCommerce plugin was loaded.",
+					RemediationSteps: []string{
+						"Wrap wc_get_order() calls inside function_exists('wc_get_order') guard check",
+						"Hook payment gateway initialization into 'woocommerce_loaded' action hook",
+						"Verify that WooCommerce is installed and active in wp-admin before executing gateway webhooks",
+					},
+					CreatedAt: time.Now(),
+				}
+
 			case "PHP_FATAL":
+				if domain == "wp-pro-success.local" {
+					inc = models.ErrorDiagnostic{
+						IncidentID:      fmt.Sprintf("inc_%06d_WP_PRO", time.Now().Unix()%1000000),
+						RequestID:       fmt.Sprintf("req_%x", time.Now().UnixNano()%0xFFFFFFF),
+						DomainName:      "wp-pro-success.local",
+						ErrorType:       "PHP_FATAL",
+						Severity:        "CRITICAL",
+						Category:        "Reliability",
+						Message:         "Fatal error: Uncaught Error: Call to undefined function wc_get_order() in /var/www/html/wp-pro-success.local/wp-content/plugins/custom-gateway/gateway.php:35",
+						File:            "/var/www/html/wp-pro-success.local/wp-content/plugins/custom-gateway/gateway.php",
+						Line:            35,
+						StackTrace:      "#0 /var/www/html/wp-pro-success.local/trigger_error.php(6): CustomPaymentGateway->processPayment(Array)\n#1 /var/www/html/wp-pro-success.local/wp-content/themes/twentytwentyfour/functions.php(102): CustomPaymentGateway->processPayment(Array)\n#2 /var/www/html/wp-pro-success.local/wp-includes/class-wp-hook.php(324): {closure}()\n#3 /var/www/html/wp-pro-success.local/wp-settings.php(695): do_action('init')\n#4 /var/www/html/wp-pro-success.local/index.php(17): require('/var/www/html/wp-pro-success.local/wp-blog-header.php')\n#5 {main}",
+						ConfidenceScore: 0.99,
+						AIRootCause:     "WooCommerce order API function wc_get_order() was called inside payment gateway execution before WooCommerce plugin was loaded.",
+						RemediationSteps: []string{
+							"Wrap wc_get_order() calls inside function_exists('wc_get_order') guard check",
+							"Hook payment gateway initialization into 'woocommerce_loaded' action hook",
+							"Verify that WooCommerce is installed and active in wp-admin before executing gateway webhooks",
+						},
+						CreatedAt: time.Now(),
+					}
+					break
+				}
 				inc = models.ErrorDiagnostic{
 					IncidentID:      fmt.Sprintf("inc_%06d_FATAL", time.Now().Unix()%1000000),
 					RequestID:       fmt.Sprintf("req_%x", time.Now().UnixNano()%0xFFFFFFF),

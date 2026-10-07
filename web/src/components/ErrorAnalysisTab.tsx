@@ -68,6 +68,7 @@ export const ErrorAnalysisTab: React.FC<ErrorAnalysisTabProps> = ({
   const [simulatingError, setSimulatingError] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [severityFilter, setSeverityFilter] = useState<string>('all');
+  const [domainFilter, setDomainFilter] = useState<string>('all');
   const [isRemediating, setIsRemediating] = useState<boolean>(false);
   const [remediatedIncidents, setRemediatedIncidents] = useState<Record<string, boolean>>({});
 
@@ -122,7 +123,7 @@ export const ErrorAnalysisTab: React.FC<ErrorAnalysisTabProps> = ({
     ]);
   };
 
-  const handleSimulateTestError = async (errorType: string) => {
+  const handleSimulateTestError = async (errorType: string, domainName: string = 'wp-pro-success.local') => {
     setSimulatingError(true);
     try {
       const res = await fetch(`${apiBase}/api/v1/diagnostics/errors`, {
@@ -131,12 +132,12 @@ export const ErrorAnalysisTab: React.FC<ErrorAnalysisTabProps> = ({
         body: JSON.stringify({
           action: 'simulate_test_error',
           error_type: errorType,
-          domain_name: 'hoatzinlabs.com',
+          domain_name: domainName,
         }),
       });
       const data = await res.json();
       if (res.ok && data.incident) {
-        showToast(`Simulated code-level ${errorType} triggered!`);
+        showToast(`Simulated code-level error triggered on ${domainName}!`);
         onRefresh();
         // Automatically open the new incident in code inspector
         setSelectedIncident(data.incident);
@@ -185,8 +186,16 @@ export const ErrorAnalysisTab: React.FC<ErrorAnalysisTabProps> = ({
     const matchesSeverity =
       severityFilter === 'all' || err.severity.toLowerCase() === severityFilter.toLowerCase();
 
-    return matchesSearch && matchesSeverity;
+    const matchesDomain =
+      domainFilter === 'all' || err.domain_name.toLowerCase() === domainFilter.toLowerCase();
+
+    return matchesSearch && matchesSeverity && matchesDomain;
   });
+
+  const uniqueDomains = Array.from(new Set(errorDiagnostics.map((e) => e.domain_name))).filter(Boolean);
+  if (!uniqueDomains.includes('wp-pro-success.local')) {
+    uniqueDomains.push('wp-pro-success.local');
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -226,11 +235,19 @@ export const ErrorAnalysisTab: React.FC<ErrorAnalysisTabProps> = ({
           <div className="relative flex items-center gap-2">
             <button
               disabled={simulatingError}
-              onClick={() => handleSimulateTestError('PHP_FATAL')}
-              className="bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-xs transition-all shadow-lg shadow-amber-500/25 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              onClick={() => handleSimulateTestError('WP_PRO_FATAL', 'wp-pro-success.local')}
+              className="bg-gradient-to-r from-purple-500 via-indigo-600 to-rose-600 hover:from-purple-400 hover:to-rose-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition-all shadow-lg shadow-purple-500/25 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              <Bug className="w-4 h-4 text-purple-200 animate-pulse" />
+              <span>{simulatingError ? 'Simulating...' : 'Test wp-pro-success.local'}</span>
+            </button>
+            <button
+              disabled={simulatingError}
+              onClick={() => handleSimulateTestError('PHP_FATAL', 'hoatzinlabs.com')}
+              className="bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-slate-950 font-bold px-3.5 py-2.5 rounded-xl text-xs transition-all shadow-lg shadow-amber-500/25 flex items-center gap-2 cursor-pointer disabled:opacity-50"
             >
               <Code className="w-4 h-4" />
-              <span>{simulatingError ? 'Simulating...' : 'Test PHP Fatal Error'}</span>
+              <span>{simulatingError ? 'Simulating...' : 'Test hoatzinlabs.com'}</span>
             </button>
             <button
               disabled={simulatingError}
@@ -333,6 +350,18 @@ export const ErrorAnalysisTab: React.FC<ErrorAnalysisTabProps> = ({
                 className="bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 w-48 sm:w-64 transition-all"
               />
             </div>
+
+            {/* Domain Filter */}
+            <select
+              value={domainFilter}
+              onChange={(e) => setDomainFilter(e.target.value)}
+              className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none focus:border-purple-500"
+            >
+              <option value="all">All Domains</option>
+              {uniqueDomains.map((d) => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
 
             {/* Severity Filter */}
             <select
