@@ -322,6 +322,9 @@ func (s *DBStore) GetWebsites() []models.Website {
 				OpcacheEnabled:    true,
 			}
 			w.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAtStr)
+			if w.PreviewURL == "" {
+				w.PreviewURL = "/sites/" + w.DomainName + "/"
+			}
 			list = append(list, w)
 		}
 	}
@@ -731,6 +734,61 @@ func (s *DBStore) GetMailboxes() []models.Mailbox {
 		}
 	}
 	return list
+}
+
+func (s *DBStore) AddMailDomain(name string) (*models.MailDomain, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res, err := s.db.Exec("INSERT INTO mail_domains (team_id, name, status, created_at) VALUES (1, ?, 'verified', DATETIME('now'))", name)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	return &models.MailDomain{
+		ID:        id,
+		TeamID:    1,
+		Name:      name,
+		Status:    "verified",
+		CreatedAt: time.Now(),
+	}, nil
+}
+
+func (s *DBStore) DeleteMailDomain(id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, _ = s.db.Exec("DELETE FROM mailboxes WHERE domain_id = ?", id)
+	_, err := s.db.Exec("DELETE FROM mail_domains WHERE id = ?", id)
+	return err
+}
+
+func (s *DBStore) AddMailbox(domainID int64, localPart, address string, quotaMB int64) (*models.Mailbox, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res, err := s.db.Exec("INSERT INTO mailboxes (domain_id, local_part, address, quota_mb, active, created_at) VALUES (?, ?, ?, ?, 1, DATETIME('now'))", domainID, localPart, address, quotaMB)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	return &models.Mailbox{
+		ID:        id,
+		DomainID:  domainID,
+		LocalPart: localPart,
+		Address:   address,
+		QuotaMB:   quotaMB,
+		Active:    true,
+		CreatedAt: time.Now(),
+	}, nil
+}
+
+func (s *DBStore) DeleteMailbox(id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec("DELETE FROM mailboxes WHERE id = ?", id)
+	return err
 }
 
 func (s *DBStore) Close() error {

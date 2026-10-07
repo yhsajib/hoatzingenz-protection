@@ -2,8 +2,12 @@ package services
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha1"
 	"crypto/sha256"
+	"encoding/base32"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -78,4 +82,50 @@ func ValidateToken(tokenStr string) (*JWTClaims, error) {
 	}
 
 	return &claims, nil
+}
+
+// ---------------------------------------------------------------------------
+// 2FA TOTP (RFC 6238) Implementation
+// ---------------------------------------------------------------------------
+
+func GenerateTOTPSecret() string {
+	b := make([]byte, 10)
+	_, _ = rand.Read(b)
+	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b)
+}
+
+func GenerateTOTPCode(secret string, t time.Time) string {
+	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(secret))
+	if err != nil {
+		return ""
+	}
+	counter := uint64(t.Unix() / 30)
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, counter)
+
+	mac := hmac.New(sha1.New, key)
+	mac.Write(buf)
+	hash := mac.Sum(nil)
+
+	offset := hash[len(hash)-1] & 0x0f
+	code := (uint32(hash[offset]&0x7f)<<24 | uint32(hash[offset+1])<<16 | uint32(hash[offset+2])<<8 | uint32(hash[offset+3])) % 1000000
+	return fmt.Sprintf("%06d", code)
+}
+
+func ValidateTOTPCode(secret string, code string) bool {
+	code = strings.TrimSpace(code)
+	if len(code) != 6 {
+		return false
+	}
+	now := time.Now()
+	for _, dt := range []time.Duration{-30 * time.Second, 0, 30 * time.Second} {
+		if GenerateTOTPCode(secret, now.Add(dt)) == code {
+			return true
+		}
+	}
+	return false
+}
+
+func GenerateOTPAuthURL(username string, secret string) string {
+	return fmt.Sprintf("otpauth://totp/HoatzinGenz:%s?secret=%s&issuer=HoatzinGenz", username, secret)
 }

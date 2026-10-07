@@ -56,6 +56,7 @@ type Website struct {
 	TeamID       int64              `json:"team_id"`
 	DomainName   string             `json:"domain_name"`
 	DocumentRoot string             `json:"document_root"`
+	PreviewURL   string             `json:"preview_url,omitempty"`
 	PHPVersion   string             `json:"php_version"` // 7.4, 8.0, 8.1, 8.2, 8.3, 8.4
 	SiteType     string             `json:"site_type"`   // wordpress, laravel, nodejs, python, static, reverse_proxy
 	AppPort      int                `json:"app_port"`    // For nodejs, python, proxy apps (e.g. 3000, 8000)
@@ -240,3 +241,114 @@ type APIKey struct {
 }
 
 
+
+// S3Config holds S3/MinIO cloud backup credentials
+type S3Config struct {
+	Endpoint   string `json:"endpoint"`
+	Region     string `json:"region"`
+	Bucket     string `json:"bucket"`
+	AccessKey  string `json:"access_key"`
+	SecretKey  string `json:"secret_key,omitempty"`
+	PathPrefix string `json:"path_prefix"`
+}
+
+// SFTPConfig holds remote SFTP backup credentials
+type SFTPConfig struct {
+	Host      string `json:"host"`
+	Port      int    `json:"port"`
+	Username  string `json:"username"`
+	Password  string `json:"password,omitempty"`
+	RemoteDir string `json:"remote_dir"`
+}
+
+// BackupConfig manages scheduled automated backups & retention settings
+type BackupConfig struct {
+	DomainName     string     `json:"domain_name"`
+	Enabled        bool       `json:"enabled"`
+	Schedule       string     `json:"schedule"`        // daily, weekly, monthly
+	RetentionCount int        `json:"retention_count"` // e.g. 7
+	StorageType    string     `json:"storage_type"`    // local, s3, sftp
+	S3             S3Config   `json:"s3"`
+	SFTP           SFTPConfig `json:"sftp"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+
+// AppSupervisorConfig defines Node.js / Python app runner settings
+type AppSupervisorConfig struct {
+	ID          string    `json:"id"`
+	Domain      string    `json:"domain"`
+	AppType     string    `json:"app_type"` // nodejs, python
+	Port        int       `json:"port"`
+	EntryFile   string    `json:"entry_file"` // app.js or main.py
+	WorkDir     string    `json:"work_dir"`
+	Status      string    `json:"status"` // running, stopped, error
+	ProcessID   int       `json:"process_id"`
+	EnvVars     string    `json:"env_vars"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// MigrationJob defines automated server transfer over SSH
+type MigrationJob struct {
+	ID             string    `json:"id"`
+	RemoteHost     string    `json:"remote_host"`
+	RemotePort     int       `json:"remote_port"`
+	RemoteUser     string    `json:"remote_user"`
+	SSHKeyOrPass   string    `json:"-"`
+	TransferSites  bool      `json:"transfer_sites"`
+	TransferDBs    bool      `json:"transfer_dbs"`
+	TransferSSL    bool      `json:"transfer_ssl"`
+	Status         string    `json:"status"` // pending, in_progress, completed, failed
+	ProgressLog    []string  `json:"progress_log"`
+	StartedAt      time.Time `json:"started_at"`
+}
+
+// NotificationConfig defines alert channels (Telegram, Slack, Email)
+type NotificationConfig struct {
+	TelegramEnabled bool   `json:"telegram_enabled"`
+	TelegramToken   string `json:"telegram_token"`
+	TelegramChatID  string `json:"telegram_chat_id"`
+	SlackEnabled    bool   `json:"slack_enabled"`
+	SlackWebhookURL string `json:"slack_webhook_url"`
+	EmailEnabled    bool   `json:"email_enabled"`
+	EmailSMTP       string `json:"email_smtp"`
+	EmailTo         string `json:"email_to"`
+	AlertOnFail2Ban bool   `json:"alert_on_fail2ban"`
+	AlertOnAutoHeal bool   `json:"alert_on_autoheal"`
+	AlertOnBackup   bool   `json:"alert_on_backup"`
+}
+
+// DNSRecord represents a local / Cloudflare DNS entry
+type DNSRecord struct {
+	ID        string `json:"id"`
+	Domain    string `json:"domain"`
+	Type      string `json:"type"` // A, AAAA, CNAME, MX, TXT
+	Name      string `json:"name"` // e.g. @, www, mail
+	Value     string `json:"value"`
+	TTL       int    `json:"ttl"`
+	Proxied   bool   `json:"proxied"`
+}
+
+type CloudflareConfig struct {
+	Enabled  bool   `json:"enabled"`
+	APIToken string `json:"api_token"`
+	ZoneID   string `json:"zone_id"`
+}
+
+// SystemSparklinePoint defines real-time system metrics history
+type SystemSparklinePoint struct {
+	Timestamp int64   `json:"timestamp"`
+	CPU       float64 `json:"cpu"`
+	RAM       float64 `json:"ram"`
+	DiskIO    float64 `json:"disk_io"`
+	NetworkTx float64 `json:"network_tx"`
+	NetworkRx float64 `json:"network_rx"`
+}
+
+// DomainBandwidth holds bandwidth usage stats parsed from web logs
+type DomainBandwidth struct {
+	Domain      string `json:"domain"`
+	BytesSent   int64  `json:"bytes_sent"`
+	HumanSize   string `json:"human_size"`
+	RequestCnt  int64  `json:"request_count"`
+}

@@ -12,6 +12,17 @@ import (
 	"hoatzingenz-protection/api/models"
 )
 
+func (v *VHostAutomationEngine) fpmPoolDirForPHP(phpVer string) string {
+	if phpVer == "" {
+		phpVer = "8.3"
+	}
+	dir := fmt.Sprintf("/etc/php/%s/fpm/pool.d", phpVer)
+	if _, err := os.Stat(dir); err == nil {
+		return dir
+	}
+	return v.FPMPoolDir
+}
+
 type VHostAutomationEngine struct {
 	NginxAvailableDir string
 	NginxEnabledDir   string
@@ -225,7 +236,9 @@ func (v *VHostAutomationEngine) ProvisionWebsite(site models.Website) error {
 		var fpmBuf bytes.Buffer
 		_ = fpmTmpl.Execute(&fpmBuf, site)
 
-		fpmPath := filepath.Join(v.FPMPoolDir, site.DomainName+".conf")
+		fpmDir := v.fpmPoolDirForPHP(site.PHPVersion)
+		_ = os.MkdirAll(fpmDir, 0755)
+		fpmPath := filepath.Join(fpmDir, site.DomainName+".conf")
 		if err := os.WriteFile(fpmPath, fpmBuf.Bytes(), 0644); err == nil {
 			log.Printf("[INFO] Created FPM pool config: %s", fpmPath)
 			_ = exec.Command("systemctl", "reload", "php"+site.PHPVersion+"-fpm").Run()
@@ -450,3 +463,42 @@ func (v *VHostAutomationEngine) DeprovisionWebsite(domainName string) error {
 }
 
 
+
+
+func (v *VHostAutomationEngine) GetNginxVHostConfig(domain string) (string, error) {
+	vhostPath := filepath.Join(v.NginxAvailableDir, domain+".conf")
+	data, err := os.ReadFile(vhostPath)
+	if err != nil {
+		site := models.Website{DomainName: domain, SiteType: "wordpress", PHPVersion: "8.3"}
+		return v.GenerateNginxConfig(site), nil
+	}
+	return string(data), nil
+}
+
+func (v *VHostAutomationEngine) SaveNginxVHostConfig(domain string, content string) error {
+	if v.DryRun {
+		return nil
+	}
+	vhostPath := filepath.Join(v.NginxAvailableDir, domain+".conf")
+	
+	backupPath := vhostPath + ".bak"
+	if oldData, err := os.ReadFile(vhostPath); err == nil {
+		_ = os.WriteFile(backupPath, oldData, 0644)
+	}
+
+	if err := os.WriteFile(vhostPath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write Nginx vhost file: %w", err)
+	}
+
+	out, err := exec.Command("nginx", "-t").CombinedOutput()
+	if err != nil {
+		if backupData, readErr := os.ReadFile(backupPath); readErr == nil {
+			_ = os.WriteFile(vhostPath, backupData, 0644)
+		}
+		return fmt.Errorf("Nginx configuration test failed:\n%s", string(out))
+	}
+
+	_ = exec.Command("systemctl", "reload", "nginx").Run()
+	_ = os.Remove(backupPath)
+	return nil
+}

@@ -37,7 +37,15 @@ func siteRoot(domain string) (string, error) {
 	if domain == "" || strings.Contains(domain, "..") || !domainRe.MatchString(domain) {
 		return "", fmt.Errorf("invalid domain")
 	}
-	return filepath.Join(webRootBase(), domain), nil
+	root := filepath.Join(webRootBase(), domain)
+	if _, err := os.Stat(root); os.IsNotExist(err) {
+		localFallback := filepath.Join("./data/sites", domain)
+		if _, err := os.Stat(localFallback); err == nil {
+			return localFallback, nil
+		}
+		_ = os.MkdirAll(root, 0755)
+	}
+	return root, nil
 }
 
 // resolvePath maps a user supplied path (absolute panel path or relative) to a real

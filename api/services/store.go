@@ -478,5 +478,87 @@ func (s *MemoryStore) GetMailboxes() []models.Mailbox {
 	return s.mailboxes
 }
 
+func (s *MemoryStore) AddMailDomain(name string) (*models.MailDomain, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	id := int64(len(s.mailDomains) + 1)
+	md := models.MailDomain{
+		ID:        id,
+		TeamID:    1,
+		Name:      name,
+		Status:    "verified",
+		CreatedAt: time.Now(),
+	}
+	s.mailDomains = append(s.mailDomains, md)
+	return &md, nil
+}
+
+func (s *MemoryStore) DeleteMailDomain(id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var newDomains []models.MailDomain
+	for _, d := range s.mailDomains {
+		if d.ID != id {
+			newDomains = append(newDomains, d)
+		}
+	}
+	s.mailDomains = newDomains
+
+	var newBoxes []models.Mailbox
+	for _, b := range s.mailboxes {
+		if b.DomainID != id {
+			newBoxes = append(newBoxes, b)
+		}
+	}
+	s.mailboxes = newBoxes
+	return nil
+}
+
+func (s *MemoryStore) AddMailbox(domainID int64, localPart, address string, quotaMB int64) (*models.Mailbox, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	id := int64(len(s.mailboxes) + 1)
+	mb := models.Mailbox{
+		ID:        id,
+		DomainID:  domainID,
+		LocalPart: localPart,
+		Address:   address,
+		QuotaMB:   quotaMB,
+		Active:    true,
+		CreatedAt: time.Now(),
+	}
+	s.mailboxes = append(s.mailboxes, mb)
+	return &mb, nil
+}
+
+func (s *MemoryStore) DeleteMailbox(id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var newBoxes []models.Mailbox
+	for _, b := range s.mailboxes {
+		if b.ID != id {
+			newBoxes = append(newBoxes, b)
+		}
+	}
+	s.mailboxes = newBoxes
+	return nil
+}
 
 
+
+
+func (s *MemoryStore) DeleteFTPAccount(id int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, f := range s.ftpAccounts {
+		if f.ID == id {
+			s.ftpAccounts = append(s.ftpAccounts[:i], s.ftpAccounts[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
