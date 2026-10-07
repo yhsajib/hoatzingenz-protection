@@ -1,6 +1,7 @@
 import { fetchWebsites, fetchVHostConfig, saveVHostConfig, fetchBackups, createBackup, deleteBackup, fetchBackupSettings, saveBackupSettings, testStorageConnection, cloneWebsite, fetchAppSupervisor, deployAppSupervisor, startServerMigration, fetchNotificationConfig, saveNotificationConfig, fetchDNSRecords, addDNSRecord, syncCloudflareDNS, fetchSystemSparklines, fetchDomainBandwidth } from './services/api';
 import { AuthGate } from './components/common/AuthGate';
 import { EmailWebmailTab } from './components/EmailWebmailTab';
+import { ErrorAnalysisTab } from './components/ErrorAnalysisTab';
 import React, { useEffect, useState } from 'react';
 import {
   Bell,
@@ -3978,40 +3979,13 @@ export default function App() {
 
           {/* ERROR ANALYSIS TAB */}
           {activeTab === 'error_analysis' && !activeManageSite && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-2xl font-bold text-white flex items-center gap-3">
-                  <Bug className="w-7 h-7 text-amber-400" />
-                  <span>Advanced Error Analysis & AI Root Cause Subsystem</span>
-                </h2>
-                <p className="text-sm text-slate-400 mt-1">Trace failures, stack traces, and evidence-grounded AI diagnostic reports</p>
-              </div>
-
-              <div className="space-y-4">
-                {errorDiagnostics.map((err) => (
-                  <div key={err.id} className="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <span className="font-mono text-xs text-slate-400 font-bold">{err.incident_id}</span>
-                        <span className="bg-slate-950 text-cyan-400 text-xs px-2.5 py-0.5 rounded-full border border-slate-800 font-mono">
-                          {err.domain_name}
-                        </span>
-                        <span className="bg-rose-500/10 text-rose-400 text-xs px-2.5 py-0.5 rounded-full font-bold border border-rose-500/20">
-                          {err.error_type}
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => setSelectedIncident(err)}
-                        className="bg-cyan-500 text-slate-950 font-bold text-xs px-4 py-2 rounded-xl cursor-pointer flex items-center gap-2"
-                      >
-                        <Sparkles className="w-3.5 h-3.5" /> AI Diagnostic Report
-                      </button>
-                    </div>
-                    <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 font-mono text-xs text-rose-300">{err.message}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <ErrorAnalysisTab
+              errorDiagnostics={errorDiagnostics}
+              onRefresh={fetchData}
+              getHeaders={getHeaders}
+              apiBase={API_BASE}
+              showToast={showToast}
+            />
           )}
 
           {/* DATABASES TAB (ADVANCED ENTERPRISE SUITE) */}
