@@ -169,6 +169,22 @@ func (v *VHostAutomationEngine) MySQLCreate(name, user, pass string) error {
 	return err
 }
 
+func (v *VHostAutomationEngine) MySQLChangePassword(user, newPass string) error {
+	if !ValidIdent(user) {
+		return fmt.Errorf("invalid user name")
+	}
+	if len(newPass) < 6 {
+		return fmt.Errorf("password must be at least 6 characters")
+	}
+	q := fmt.Sprintf("CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s'; "+
+		"ALTER USER '%s'@'localhost' IDENTIFIED BY '%s'; "+
+		"ALTER USER IF EXISTS '%s'@'127.0.0.1' IDENTIFIED BY '%s'; "+
+		"ALTER USER IF EXISTS '%s'@'%%' IDENTIFIED BY '%s'; "+
+		"FLUSH PRIVILEGES;", user, sqlStr(newPass), user, sqlStr(newPass), user, sqlStr(newPass), user, sqlStr(newPass))
+	_, err := v.mysql(q)
+	return err
+}
+
 func (v *VHostAutomationEngine) MySQLDrop(name, user string) error {
 	if !ValidIdent(name) || (user != "" && !ValidIdent(user)) {
 		return fmt.Errorf("invalid database or user name")
@@ -902,6 +918,38 @@ func (v *VHostAutomationEngine) SiteAction(site models.Website, action string) (
 	case "fix_permissions":
 		_, err := runCmd(5*time.Minute, "chown", "-R", "www-data:www-data", SiteRootDir(site.DomainName))
 		return "Ownership reset to www-data", err
+	case "deactivate", "suspend":
+		_, enabled, _, unit := vhostFiles(v, site.DomainName)
+		_ = os.Remove(enabled)
+		if _, err := os.Stat(unit); err == nil {
+			_, _ = runCmd(30*time.Second, "systemctl", "stop", filepath.Base(unit))
+		}
+		if globalSupervisor != nil {
+			for _, app := range globalSupervisor.ListApps() {
+				if strings.EqualFold(app.Domain, site.DomainName) {
+					_ = globalSupervisor.StopApp(app.ID)
+				}
+			}
+		}
+		_, _ = runCmd(30*time.Second, "systemctl", "reload", "nginx")
+		return "Website / application deactivated successfully", nil
+	case "activate", "unsuspend", "resume":
+		avail, enabled, _, unit := vhostFiles(v, site.DomainName)
+		if _, err := os.Stat(avail); os.IsNotExist(err) {
+			cfg := v.GenerateNginxConfig(site)
+			_ = os.WriteFile(avail, []byte(cfg), 0644)
+		}
+		_ = os.Remove(enabled)
+		if err := os.Symlink(avail, enabled); err != nil {
+			log.Printf("[WARN] Failed to create vhost symlink on activate: %v", err)
+		}
+		if _, err := os.Stat(unit); err == nil {
+			_, _ = runCmd(30*time.Second, "systemctl", "start", filepath.Base(unit))
+		}
+		if err := exec.Command("nginx", "-t").Run(); err == nil {
+			_, _ = runCmd(30*time.Second, "systemctl", "reload", "nginx")
+		}
+		return "Website / application activated successfully", nil
 	}
 	return "", fmt.Errorf("unknown action")
 }
@@ -1082,6 +1130,18 @@ func (v *VHostAutomationEngine) PostgresCreate(name, user, pass string) error {
 	return nil
 }
 
+func (v *VHostAutomationEngine) PostgresChangePassword(user, newPass string) error {
+	if !ValidIdent(user) {
+		return fmt.Errorf("invalid user name")
+	}
+	if len(newPass) < 6 {
+		return fmt.Errorf("password must be at least 6 characters")
+	}
+	q := fmt.Sprintf("ALTER USER \"%s\" WITH PASSWORD '%s';", user, sqlStr(newPass))
+	_, err := v.psql("postgres", q)
+	return err
+}
+
 func (v *VHostAutomationEngine) PostgresDrop(name, user string) error {
 	if !ValidIdent(name) {
 		return fmt.Errorf("invalid database name")
@@ -1171,87 +1231,15 @@ func (v *VHostAutomationEngine) MongoQuery(name, query string) (string, error) {
 	if !ValidIdent(name) {
 		return "", fmt.Errorf("invalid database name")
 	}
-	qTrim := strings.TrimSpace(query)
-	qUpper := strings.ToUpper(qTrim)
-
-	if qUpper == "SHOW TABLES;" || qUpper == "SHOW TABLES" || qUpper == "SHOW COLLECTIONS;" || qUpper == "SHOW COLLECTIONS" || qUpper == "SHOW TABLE STATUS;" {
-		return "Name\tEngine\tVersion\tRow_format\tRows\tAvg_row_length\tData_length\nanalytics_events\tMongoDB BSON\t1.0\tBSON\t1420000\t137\t194404352\nuser_sessions_v2\tMongoDB BSON\t1.0\tBSON\t85200\t1132\t96567296\npage_views\tMongoDB BSON\t1.0\tBSON\t420000\t83\t34917580", nil
-	}
-
-	limit := 50
-	if idx := strings.Index(qUpper, "LIMIT "); idx != -1 {
-		var l int
-		if _, err := fmt.Sscanf(qUpper[idx+6:], "%d", &l); err == nil && l > 0 {
-			limit = l
+	mongoBin := "mongosh"
+	if _, err := exec.LookPath("mongosh"); err != nil {
+		if _, err2 := exec.LookPath("mongo"); err2 == nil {
+			mongoBin = "mongo"
+		} else {
+			return "", fmt.Errorf("MongoDB CLI (mongosh / mongo) is not installed on the system")
 		}
 	}
-	if limit > 500 {
-		limit = 500
-	}
-
-	tblLower := strings.ToLower(qTrim)
-	if strings.Contains(tblLower, "user_sessions_v2") {
-		var sb strings.Builder
-		sb.WriteString("session_id\tuser_id\tip_address\tdevice_agent\tstatus\tlogin_time\texpire_at\n")
-		statuses := []string{"active", "active", "active", "idle", "expired"}
-		ips := []string{"192.168.1.45", "10.0.0.12", "172.16.0.8", "198.51.100.22", "203.0.113.88"}
-		devices := []string{"Mozilla/5.0 (Windows NT 10.0; Win64; x64)", "Mozilla/5.0 (Macintosh; Intel Mac OS X)", "Mozilla/5.0 (iPhone; CPU OS 17_4)", "Mozilla/5.0 (Linux; Android 14)", "PostmanRuntime/7.36"}
-		for i := 1; i <= limit; i++ {
-			sid := fmt.Sprintf("SESS_%07d", 8492000+i)
-			uid := fmt.Sprintf("user_%04d", (i*37)%1200+100)
-			ip := ips[i%len(ips)]
-			dev := devices[i%len(devices)]
-			st := statuses[i%len(statuses)]
-			login := fmt.Sprintf("2026-10-06 %02d:%02d:%02d", 10+(i%13), (i*7)%60, (i*13)%60)
-			exp := fmt.Sprintf("2026-10-07 %02d:%02d:%02d", 10+(i%13), (i*7)%60, (i*13)%60)
-			sb.WriteString(fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s\t%s\n", sid, uid, ip, dev, st, login, exp))
-		}
-		return strings.TrimSuffix(sb.String(), "\n"), nil
-	}
-
-	if strings.Contains(tblLower, "analytics_events") {
-		var sb strings.Builder
-		sb.WriteString("event_id\ttimestamp\tevent_type\tuser_ip\tpayload\n")
-		evTypes := []string{"page_view", "button_click", "api_request", "form_submit", "cart_add"}
-		ips := []string{"192.168.1.45", "10.0.0.12", "172.16.0.8", "198.51.100.22", "203.0.113.88"}
-		paths := []string{"/dashboard", "/pricing", "/checkout", "/login", "/settings"}
-		for i := 1; i <= limit; i++ {
-			eid := fmt.Sprintf("EVT_%06d", 940000+i)
-			ts := fmt.Sprintf("2026-10-06 %02d:%02d:%02d", 12+(i%12), (i*11)%60, (i*17)%60)
-			et := evTypes[i%len(evTypes)]
-			ip := ips[i%len(ips)]
-			path := paths[i%len(paths)]
-			payload := fmt.Sprintf("{\"path\":\"%s\",\"duration_ms\":%d}", path, 50+(i*23)%300)
-			sb.WriteString(fmt.Sprintf("%s\t%s\t%s\t%s\t%s\n", eid, ts, et, ip, payload))
-		}
-		return strings.TrimSuffix(sb.String(), "\n"), nil
-	}
-
-	if strings.Contains(tblLower, "page_views") {
-		var sb strings.Builder
-		sb.WriteString("view_id\turl_path\treferrer\tload_time_ms\tbrowser\tcreated_at\n")
-		paths := []string{"/home", "/features", "/docs/api", "/blog/security", "/contact"}
-		refs := []string{"https://google.com", "https://github.com", "https://twitter.com", "direct", "https://bing.com"}
-		browsers := []string{"Chrome 128.0", "Firefox 126.0", "Safari 17.4", "Edge 128.0"}
-		for i := 1; i <= limit; i++ {
-			vid := fmt.Sprintf("PV_%06d", 100000+i)
-			p := paths[i%len(paths)]
-			ref := refs[i%len(refs)]
-			lt := 45 + (i*19)%250
-			br := browsers[i%len(browsers)]
-			ts := fmt.Sprintf("2026-10-06 %02d:%02d:%02d", (i%24), (i*3)%60, (i*9)%60)
-			sb.WriteString(fmt.Sprintf("%s\t%s\t%s\t%d\t%s\t%s\n", vid, p, ref, lt, br, ts))
-		}
-		return strings.TrimSuffix(sb.String(), "\n"), nil
-	}
-
-	// Generic table fallback
-	var sb strings.Builder
-	sb.WriteString("id\trecord_key\tdocument_value\tcreated_at\n")
-	for i := 1; i <= limit; i++ {
-		sb.WriteString(fmt.Sprintf("%d\tdoc_%05d\t{\"item\":\"val_%d\"}\t2026-10-06 23:55:00\n", i, i, i))
-	}
-	return strings.TrimSuffix(sb.String(), "\n"), nil
+	return runCmd(30*time.Second, mongoBin, name, "--quiet", "--eval", query)
 }
 
 func (v *VHostAutomationEngine) RedisQuery(name, query string) (string, error) {

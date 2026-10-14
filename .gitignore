@@ -55,3 +55,6 @@ Thumbs.db
 *.swo
 *~
 *.bak
+bin/
+diagnostic-agent/diagnostic-agent
+*Zone.Identifier*

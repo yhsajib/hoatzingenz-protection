@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -84,12 +85,23 @@ func (p *ProcessWatcher) ScanLinuxProcFS() []*ProcessEvent {
 			continue // Not a PID directory
 		}
 
-		cmdlinePath := filepath.Join("/proc", entry.Name(), "cmdline")
+		procDir := filepath.Join("/proc", entry.Name())
+		info, err := os.Stat(procDir)
+		if err != nil {
+			continue
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		// Only inspect if process actually belongs to www-data (UID 33) or web user
+		if !ok || stat.Uid != 33 {
+			continue
+		}
+
+		cmdlinePath := filepath.Join(procDir, "cmdline")
 		cmdBytes, err := os.ReadFile(cmdlinePath)
 		if err != nil {
 			continue
 		}
-		cmdline := strings.ReplaceAll(string(cmdBytes), "\x00", " ")
+		cmdline := strings.TrimSpace(strings.ReplaceAll(string(cmdBytes), "\x00", " "))
 
 		if cmdline != "" {
 			if alert := p.InspectProcess(pid, "www-data", cmdline); alert != nil {

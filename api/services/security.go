@@ -31,14 +31,14 @@ func GenerateWAFNginxSnippet(cfg models.SiteSecurityConfig) string {
 	}
 
 	if cfg.HotlinkProtection {
-		sb.WriteString(fmt.Sprintf(`    # Hotlink Protection
+		sb.WriteString(`    # Hotlink Protection
     location ~* \.(jpg|jpeg|png|gif|webp|svg|ico)$ {
         valid_referers none blocked server_names ~\.google\. ~\.bing\.;
         if ($invalid_referer) {
             return 403;
         }
     }
-`, cfg.DomainName))
+`)
 	}
 
 	if len(cfg.BlockedIPs) > 0 {

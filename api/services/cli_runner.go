@@ -35,7 +35,7 @@ func ExecuteWPCLI(domain string, cliCmd string) (string, error) {
 	}
 
 	if _, err := os.Stat(wpPath); os.IsNotExist(err) {
-		return fmt.Sprintf("[WP-CLI NOTICE] wp binary not installed on host server. Command 'wp %s' simulated for %s", cliCmd, domain), nil
+		return "", fmt.Errorf("wp-cli binary is not installed on host server (install via https://wp-cli.org)")
 	}
 
 	args := []string{"--path=" + docRoot, "--allow-root"}
@@ -72,7 +72,7 @@ func ExecuteArtisan(domain string, artisanCmd string) (string, error) {
 
 	artisanFile := filepath.Join(docRoot, "artisan")
 	if _, err := os.Stat(artisanFile); os.IsNotExist(err) {
-		return fmt.Sprintf("[ARTISAN NOTICE] Laravel artisan binary not found at %s. Command 'php artisan %s' simulated for %s", artisanFile, artisanCmd, domain), nil
+		return "", fmt.Errorf("laravel artisan binary not found at %s", artisanFile)
 	}
 
 	phpPath, err := exec.LookPath("php")

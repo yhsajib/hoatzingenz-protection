@@ -10,14 +10,16 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+	"strings"
 
 	"hoatzingenz-protection/api/models"
 	_ "modernc.org/sqlite"
 )
 
 type DBStore struct {
-	db *sql.DB
-	mu sync.RWMutex
+	db        *sql.DB
+	mu        sync.RWMutex
+	diagSites map[string]bool
 }
 
 func NewDBStore(dbPath string) (*DBStore, error) {
@@ -36,7 +38,7 @@ func NewDBStore(dbPath string) (*DBStore, error) {
 		log.Printf("[WARN] Failed to set WAL pragma: %v", err)
 	}
 
-	store := &DBStore{db: db}
+	store := &DBStore{db: db, diagSites: make(map[string]bool)}
 	if err := store.initTables(); err != nil {
 		return nil, fmt.Errorf("failed to initialize db tables: %w", err)
 	}
@@ -47,12 +49,17 @@ func NewDBStore(dbPath string) (*DBStore, error) {
 }
 
 func (s *DBStore) initTables() error {
+	_, _ = s.db.Exec("ALTER TABLE websites ADD COLUMN deep_diagnostics_enabled INTEGER DEFAULT 0;")
+	_, _ = s.db.Exec("ALTER TABLE users ADD COLUMN two_factor_enabled INTEGER DEFAULT 0;")
+	_, _ = s.db.Exec("ALTER TABLE users ADD COLUMN two_factor_secret TEXT DEFAULT '';")
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS users (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			username TEXT UNIQUE NOT NULL,
 			password_hash TEXT NOT NULL,
 			role TEXT NOT NULL DEFAULT 'admin',
+			two_factor_enabled INTEGER DEFAULT 0,
+			two_factor_secret TEXT DEFAULT '',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);`,
 		`CREATE TABLE IF NOT EXISTS websites (
@@ -141,6 +148,21 @@ func (s *DBStore) initTables() error {
 			role TEXT DEFAULT 'agent',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);`,
+				`CREATE TABLE IF NOT EXISTS user_sessions (
+			id TEXT PRIMARY KEY,
+			user_id INTEGER DEFAULT 1,
+			username TEXT NOT NULL,
+			role TEXT NOT NULL DEFAULT 'admin',
+			ip_address TEXT NOT NULL,
+			mac_address TEXT NOT NULL,
+			user_agent TEXT NOT NULL,
+			device_info TEXT NOT NULL,
+			location TEXT NOT NULL,
+			token_hash TEXT NOT NULL,
+			is_active INTEGER NOT NULL DEFAULT 1,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			last_active DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`,
 		`CREATE TABLE IF NOT EXISTS cron_jobs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			website_id INTEGER DEFAULT 0,
@@ -162,111 +184,53 @@ func (s *DBStore) initTables() error {
 	return nil
 }
 
-func HashPassword(password string) string {
+func HashAPIKey(key string) string {
 	hasher := sha256.New()
-	hasher.Write([]byte(password + "_hoatzin_salt_2026"))
+	hasher.Write([]byte(key + "_hoatzin_salt_2026"))
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
 func (s *DBStore) seedInitialData() {
 	var userCount int
-	s.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&userCount)
+	_ = s.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&userCount)
 	if userCount == 0 {
-		hash := HashPassword("admin123")
-		s.db.Exec("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)", "admin", hash, "admin")
+		hash, _ := HashPassword("admin123")
+		_, _ = s.db.Exec("INSERT INTO users (username, password_hash, role, two_factor_enabled, two_factor_secret) VALUES (?, ?, ?, 0, '')", "admin", hash, "admin")
 		log.Printf("[INFO] Initialized default admin user (Username: admin)")
 	}
 
-	var siteCount int
-	s.db.QueryRow("SELECT COUNT(*) FROM websites").Scan(&siteCount)
-	if siteCount == 0 {
-		s.AddWebsite(models.Website{
-			TeamID:       1,
-			DomainName:   "hoatzinlabs.com",
-			DocumentRoot: "/var/www/html/hoatzinlabs.com",
-			PHPVersion:   "8.3",
-			SiteType:     "wordpress",
-			SSLEnabled:   true,
-			SSLProvider:  "letsencrypt",
-			SSLAutoRenew: true,
-			Status:       "active",
-			TrackingID:   "trk_demo_123456",
-		})
-	}
-
-	var dbCount int
-	s.db.QueryRow("SELECT COUNT(*) FROM server_databases").Scan(&dbCount)
-	if dbCount == 0 {
-		s.AddDatabase(models.ServerDatabase{
-			TeamID:        1,
-			Name:          "wp_hoatzin_prod",
-			Engine:        "mysql",
-			Host:          "127.0.0.1",
-			Port:          3306,
-			Charset:       "utf8mb4",
-			Collate:       "utf8mb4_unicode_ci",
-			Username:      "wp_user_prod",
-			ConnectionURI: "mysql://wp_user_prod:secret@127.0.0.1:3306/wp_hoatzin_prod",
-			SizeMB:        48.5,
-		})
-		s.AddDatabase(models.ServerDatabase{
-			TeamID:        1,
-			Name:          "laravel_app_db",
-			Engine:        "postgresql",
-			Host:          "127.0.0.1",
-			Port:          5432,
-			Charset:       "utf8",
-			Collate:       "en_US.UTF-8",
-			Username:      "pg_laravel_user",
-			ConnectionURI: "postgresql://pg_laravel_user:secret@127.0.0.1:5432/laravel_app_db?sslmode=disable",
-			SizeMB:        124.2,
-		})
-		s.AddDatabase(models.ServerDatabase{
-			TeamID:        1,
-			Name:          "analytics_store",
-			Engine:        "mongodb",
-			Host:          "127.0.0.1",
-			Port:          27017,
-			Charset:       "utf8",
-			Collate:       "binary",
-			Username:      "mongo_analytics",
-			ConnectionURI: "mongodb://mongo_analytics:secret@127.0.0.1:27017/analytics_store",
-			SizeMB:        310.8,
-		})
-		s.AddDatabase(models.ServerDatabase{
-			TeamID:        1,
-			Name:          "cache_session_db",
-			Engine:        "redis",
-			Host:          "127.0.0.1",
-			Port:          6379,
-			Charset:       "binary",
-			Username:      "default",
-			ConnectionURI: "redis://:secret_pass@127.0.0.1:6379/0",
-			SizeMB:        18.4,
-		})
-	}
-
-	var metricCount int
-	s.db.QueryRow("SELECT COUNT(*) FROM server_metrics").Scan(&metricCount)
-	if metricCount == 0 {
-		s.RecordMetric(models.ServerMetric{
-			ServerID:    "srv_prod_01",
-			CPUPercent:  12.4,
-			RAMPercent:  38.2,
-			DiskPercent: 24.8,
-			Load1Min:    0.45,
-			Load5Min:    0.50,
-			Load15Min:   0.48,
-		})
-	}
-
 	var keyCount int
-	s.db.QueryRow("SELECT COUNT(*) FROM api_keys").Scan(&keyCount)
+	_ = s.db.QueryRow("SELECT COUNT(*) FROM api_keys").Scan(&keyCount)
 	if keyCount == 0 {
 		defaultKey := "hz_agent_secret_key_2026"
-		keyHash := HashPassword(defaultKey)
-		s.db.Exec("INSERT INTO api_keys (name, key_hash, prefix, role) VALUES (?, ?, ?, ?)", "Default Security Agent Key", keyHash, "hz_agent", "agent")
+		keyHash := HashAPIKey(defaultKey)
+		_, _ = s.db.Exec("INSERT INTO api_keys (name, key_hash, prefix, role) VALUES (?, ?, ?, ?)", "Default Security Agent Key", keyHash, "hz_agent", "agent")
 	}
+}
+
+// GetUsers returns all registered users
+func (s *DBStore) GetUsers() []models.User {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query("SELECT id, username, role, two_factor_enabled, created_at FROM users ORDER BY id ASC")
+	if err != nil {
+		return []models.User{}
+	}
+	defer rows.Close()
+
+	users := make([]models.User, 0)
+	for rows.Next() {
+		var u models.User
+		var twoFA int
+		var createdAtStr string
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &twoFA, &createdAtStr); err == nil {
+			u.TwoFactorEnabled = (twoFA == 1)
+			u.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAtStr)
+			users = append(users, u)
+		}
+	}
+	return users
 }
 
 // User & Auth
@@ -276,20 +240,40 @@ func (s *DBStore) GetUserByUsername(username string) (*models.User, error) {
 
 	var u models.User
 	var createdAtStr string
-	err := s.db.QueryRow("SELECT id, username, password_hash, role, created_at FROM users WHERE username = ?", username).
-		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &createdAtStr)
+	var twoFactorEnabledInt int
+	err := s.db.QueryRow("SELECT id, username, password_hash, role, COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), created_at FROM users WHERE username = ?", username).
+		Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &twoFactorEnabledInt, &u.TwoFactorSecret, &createdAtStr)
 	if err != nil {
 		return nil, err
 	}
+	u.TwoFactorEnabled = twoFactorEnabledInt == 1
 	u.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAtStr)
 	return &u, nil
+}
+
+func (s *DBStore) UpdateUserPassword(username, newHash string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec("UPDATE users SET password_hash = ? WHERE username = ?", newHash, username)
+	return err
+}
+
+func (s *DBStore) UpdateUser2FA(username string, enabled bool, secret string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	enabledInt := 0
+	if enabled {
+		enabledInt = 1
+	}
+	_, err := s.db.Exec("UPDATE users SET two_factor_enabled = ?, two_factor_secret = ? WHERE username = ?", enabledInt, secret, username)
+	return err
 }
 
 func (s *DBStore) VerifyAPIKey(key string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	keyHash := HashPassword(key)
+	keyHash := HashAPIKey(key)
 	var count int
 	s.db.QueryRow("SELECT COUNT(*) FROM api_keys WHERE key_hash = ?", keyHash).Scan(&count)
 	return count > 0
@@ -306,7 +290,7 @@ func (s *DBStore) GetWebsites() []models.Website {
 	}
 	defer rows.Close()
 
-	var list []models.Website
+	list := make([]models.Website, 0)
 	for rows.Next() {
 		var w models.Website
 		var sslInt int
@@ -324,6 +308,9 @@ func (s *DBStore) GetWebsites() []models.Website {
 			w.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAtStr)
 			if w.PreviewURL == "" {
 				w.PreviewURL = "/sites/" + w.DomainName + "/"
+			}
+			if s.diagSites != nil {
+				w.DeepDiagnosticsEnabled = s.diagSites[strings.ToLower(w.DomainName)]
 			}
 			list = append(list, w)
 		}
@@ -350,6 +337,32 @@ func (s *DBStore) AddWebsite(w models.Website) models.Website {
 		w.ID, _ = res.LastInsertId()
 	}
 	return w
+}
+
+
+func (s *DBStore) SetWebsiteDeepDiagnostics(domain string, enabled bool) bool {
+	s.mu.Lock()
+	if s.diagSites == nil {
+		s.diagSites = make(map[string]bool)
+	}
+	s.diagSites[strings.ToLower(domain)] = enabled
+	s.mu.Unlock()
+
+	intVal := 0
+	if enabled {
+		intVal = 1
+	}
+	_, _ = s.db.Exec("UPDATE websites SET deep_diagnostics_enabled = ? WHERE LOWER(domain_name) = LOWER(?)", intVal, domain)
+	return true
+}
+
+func (s *DBStore) GetWebsiteDeepDiagnostics(domain string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.diagSites == nil {
+		return false
+	}
+	return s.diagSites[strings.ToLower(domain)]
 }
 
 func (s *DBStore) DeleteWebsite(id int64) bool {
@@ -390,7 +403,7 @@ func (s *DBStore) GetWebsiteByDomain(domain string) (*models.Website, error) {
 	var w models.Website
 	var sslInt int
 	var createdAtStr string
-	err := s.db.QueryRow("SELECT id, team_id, domain_name, document_root, php_version, site_type, ssl_enabled, ssl_provider, status, tracking_id, created_at FROM websites WHERE domain_name = ?", domain).
+	err := s.db.QueryRow("SELECT id, team_id, domain_name, document_root, php_version, site_type, ssl_enabled, ssl_provider, status, tracking_id, created_at FROM websites WHERE LOWER(domain_name) = LOWER(?)", domain).
 		Scan(&w.ID, &w.TeamID, &w.DomainName, &w.DocumentRoot, &w.PHPVersion, &w.SiteType, &sslInt, &w.SSLProvider, &w.Status, &w.TrackingID, &createdAtStr)
 	if err != nil {
 		return nil, err
@@ -400,6 +413,14 @@ func (s *DBStore) GetWebsiteByDomain(domain string) (*models.Website, error) {
 	w.PHPSettings = models.PHPSettings{MemoryLimit: "256M", UploadMaxFilesize: "64M", MaxExecutionTime: 300, DisplayErrors: false, OpcacheEnabled: true}
 	w.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAtStr)
 	return &w, nil
+}
+
+func (s *DBStore) UpdateWebsiteStatus(domain string, status string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec("UPDATE websites SET status = ? WHERE LOWER(domain_name) = LOWER(?)", status, domain)
+	return err
 }
 
 // Security Events
@@ -433,7 +454,7 @@ func (s *DBStore) GetSecurityEvents() []models.SecurityEvent {
 	}
 	defer rows.Close()
 
-	var list []models.SecurityEvent
+	list := make([]models.SecurityEvent, 0)
 	for rows.Next() {
 		var e models.SecurityEvent
 		var qInt int
@@ -486,7 +507,7 @@ func (s *DBStore) GetMetricsHistory() []models.ServerMetric {
 	}
 	defer rows.Close()
 
-	var list []models.ServerMetric
+	list := make([]models.ServerMetric, 0)
 	for rows.Next() {
 		var m models.ServerMetric
 		var createdAtStr string
@@ -503,7 +524,7 @@ func (s *DBStore) GetDatabases() []models.ServerDatabase {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rows, err := s.db.Query("SELECT id, team_id, name, engine, host, port, charset, \"collate\", username, connection_uri, size_mb, status FROM server_databases")
+	rows, err := s.db.Query("SELECT id, team_id, name, engine, host, port, charset, \"collate\", username, password, connection_uri, size_mb, status FROM server_databases")
 	if err != nil {
 		// Fallback query if older schema
 		rowsOld, errOld := s.db.Query("SELECT id, team_id, name, charset, \"collate\", driver, size_mb FROM server_databases")
@@ -511,7 +532,7 @@ func (s *DBStore) GetDatabases() []models.ServerDatabase {
 			return []models.ServerDatabase{}
 		}
 		defer rowsOld.Close()
-		var list []models.ServerDatabase
+		list := make([]models.ServerDatabase, 0)
 		for rowsOld.Next() {
 			var db models.ServerDatabase
 			if err := rowsOld.Scan(&db.ID, &db.TeamID, &db.Name, &db.Charset, &db.Collate, &db.Engine, &db.SizeMB); err == nil {
@@ -529,10 +550,10 @@ func (s *DBStore) GetDatabases() []models.ServerDatabase {
 	}
 	defer rows.Close()
 
-	var list []models.ServerDatabase
+	list := make([]models.ServerDatabase, 0)
 	for rows.Next() {
 		var db models.ServerDatabase
-		if err := rows.Scan(&db.ID, &db.TeamID, &db.Name, &db.Engine, &db.Host, &db.Port, &db.Charset, &db.Collate, &db.Username, &db.ConnectionURI, &db.SizeMB, &db.Status); err == nil {
+		if err := rows.Scan(&db.ID, &db.TeamID, &db.Name, &db.Engine, &db.Host, &db.Port, &db.Charset, &db.Collate, &db.Username, &db.Password, &db.ConnectionURI, &db.SizeMB, &db.Status); err == nil {
 			list = append(list, db)
 		}
 	}
@@ -603,8 +624,8 @@ func (s *DBStore) GetDatabaseByID(id int64) (*models.ServerDatabase, error) {
 	defer s.mu.RUnlock()
 
 	var db models.ServerDatabase
-	err := s.db.QueryRow("SELECT id, team_id, name, engine, host, port, charset, \"collate\", username, connection_uri, size_mb, status FROM server_databases WHERE id = ?", id).
-		Scan(&db.ID, &db.TeamID, &db.Name, &db.Engine, &db.Host, &db.Port, &db.Charset, &db.Collate, &db.Username, &db.ConnectionURI, &db.SizeMB, &db.Status)
+	err := s.db.QueryRow("SELECT id, team_id, name, engine, host, port, charset, \"collate\", username, password, connection_uri, size_mb, status FROM server_databases WHERE id = ?", id).
+		Scan(&db.ID, &db.TeamID, &db.Name, &db.Engine, &db.Host, &db.Port, &db.Charset, &db.Collate, &db.Username, &db.Password, &db.ConnectionURI, &db.SizeMB, &db.Status)
 	if err != nil {
 		return nil, err
 	}
@@ -616,12 +637,19 @@ func (s *DBStore) GetDatabaseByName(name string) (*models.ServerDatabase, error)
 	defer s.mu.RUnlock()
 
 	var db models.ServerDatabase
-	err := s.db.QueryRow("SELECT id, team_id, name, engine, host, port, charset, \"collate\", username, connection_uri, size_mb, status FROM server_databases WHERE name = ?", name).
-		Scan(&db.ID, &db.TeamID, &db.Name, &db.Engine, &db.Host, &db.Port, &db.Charset, &db.Collate, &db.Username, &db.ConnectionURI, &db.SizeMB, &db.Status)
+	err := s.db.QueryRow("SELECT id, team_id, name, engine, host, port, charset, \"collate\", username, password, connection_uri, size_mb, status FROM server_databases WHERE LOWER(name) = LOWER(?)", name).
+		Scan(&db.ID, &db.TeamID, &db.Name, &db.Engine, &db.Host, &db.Port, &db.Charset, &db.Collate, &db.Username, &db.Password, &db.ConnectionURI, &db.SizeMB, &db.Status)
 	if err != nil {
 		return nil, err
 	}
 	return &db, nil
+}
+
+func (s *DBStore) UpdateDatabasePassword(name, newPassword, newURI string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec("UPDATE server_databases SET password = ?, connection_uri = ? WHERE LOWER(name) = LOWER(?)", newPassword, newURI, name)
+	return err
 }
 
 func (s *DBStore) UpdateDatabaseSize(name string, sizeMB float64) {
@@ -647,7 +675,7 @@ func (s *DBStore) GetCronJobs(domain string) []models.CronJob {
 	}
 	defer rows.Close()
 
-	var list []models.CronJob
+	list := make([]models.CronJob, 0)
 	for rows.Next() {
 		var c models.CronJob
 		var activeInt int
@@ -700,7 +728,7 @@ func (s *DBStore) GetMailDomains() []models.MailDomain {
 	}
 	defer rows.Close()
 
-	var list []models.MailDomain
+	list := make([]models.MailDomain, 0)
 	for rows.Next() {
 		var m models.MailDomain
 		var createdAtStr string
@@ -722,7 +750,7 @@ func (s *DBStore) GetMailboxes() []models.Mailbox {
 	}
 	defer rows.Close()
 
-	var list []models.Mailbox
+	list := make([]models.Mailbox, 0)
 	for rows.Next() {
 		var mb models.Mailbox
 		var activeInt int
@@ -795,3 +823,117 @@ func (s *DBStore) Close() error {
 	return s.db.Close()
 }
 
+
+// ---------------------------------------------------------------------------
+// User Sessions Management (Superadmin & Hardware Tracking)
+// ---------------------------------------------------------------------------
+
+// CreateSession inserts or updates an active user session
+func (s *DBStore) CreateSession(sess models.UserSession) error {
+	query := `INSERT OR REPLACE INTO user_sessions (
+		id, user_id, username, role, ip_address, mac_address, user_agent, device_info, location, token_hash, is_active, created_at, last_active
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	_, err := s.db.Exec(query,
+		sess.ID, sess.UserID, sess.Username, sess.Role, sess.IPAddress, sess.MACAddress,
+		sess.UserAgent, sess.DeviceInfo, sess.Location, sess.TokenHash, 1, sess.CreatedAt, sess.CreatedAt,
+	)
+	return err
+}
+
+// GetActiveSessions returns all active sessions (is_active = 1) ordered by last_active DESC
+func (s *DBStore) GetActiveSessions() []models.UserSession {
+	query := `SELECT id, user_id, username, role, ip_address, mac_address, user_agent, device_info, location, token_hash, is_active, created_at, last_active
+	          FROM user_sessions WHERE is_active = 1 ORDER BY last_active DESC`
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return []models.UserSession{}
+	}
+	defer rows.Close()
+
+	sessions := make([]models.UserSession, 0)
+	for rows.Next() {
+		var sess models.UserSession
+		var lastActiveTime time.Time
+		var createdAtTime time.Time
+		var isAct int
+		if err := rows.Scan(
+			&sess.ID, &sess.UserID, &sess.Username, &sess.Role, &sess.IPAddress, &sess.MACAddress,
+			&sess.UserAgent, &sess.DeviceInfo, &sess.Location, &sess.TokenHash, &isAct,
+			&createdAtTime, &lastActiveTime,
+		); err == nil {
+			sess.IsActive = (isAct == 1)
+			sess.CreatedAt = createdAtTime
+			sess.LastActive = FormatRelativeTime(lastActiveTime)
+			sessions = append(sessions, sess)
+		}
+	}
+	return sessions
+}
+
+// GetUserSessions returns all active sessions for a specific user
+func (s *DBStore) GetUserSessions(username string) []models.UserSession {
+	query := `SELECT id, user_id, username, role, ip_address, mac_address, user_agent, device_info, location, token_hash, is_active, created_at, last_active
+	          FROM user_sessions WHERE username = ? AND is_active = 1 ORDER BY last_active DESC`
+	rows, err := s.db.Query(query, username)
+	if err != nil {
+		return []models.UserSession{}
+	}
+	defer rows.Close()
+
+	sessions := make([]models.UserSession, 0)
+	for rows.Next() {
+		var sess models.UserSession
+		var lastActiveTime time.Time
+		var createdAtTime time.Time
+		var isAct int
+		if err := rows.Scan(
+			&sess.ID, &sess.UserID, &sess.Username, &sess.Role, &sess.IPAddress, &sess.MACAddress,
+			&sess.UserAgent, &sess.DeviceInfo, &sess.Location, &sess.TokenHash, &isAct,
+			&createdAtTime, &lastActiveTime,
+		); err == nil {
+			sess.IsActive = (isAct == 1)
+			sess.CreatedAt = createdAtTime
+			sess.LastActive = FormatRelativeTime(lastActiveTime)
+			sessions = append(sessions, sess)
+		}
+	}
+	return sessions
+}
+
+// TouchSession updates the last_active timestamp for a token hash
+func (s *DBStore) TouchSession(tokenHash string) {
+	if tokenHash != "" {
+		_, _ = s.db.Exec(`UPDATE user_sessions SET last_active = CURRENT_TIMESTAMP WHERE token_hash = ? AND is_active = 1`, tokenHash)
+	}
+}
+
+// RevokeSession terminates a session by ID
+func (s *DBStore) RevokeSession(sessionID string) error {
+	_, err := s.db.Exec(`UPDATE user_sessions SET is_active = 0 WHERE id = ?`, sessionID)
+	return err
+}
+
+// RevokeAllUserSessionsExcept terminates all active sessions for a user except the specified one
+func (s *DBStore) RevokeAllUserSessionsExcept(username string, exceptID string) error {
+	_, err := s.db.Exec(`UPDATE user_sessions SET is_active = 0 WHERE username = ? AND id != ?`, username, exceptID)
+	return err
+}
+
+// IsSessionRevoked checks if a token hash corresponds to a revoked/inactive session
+func (s *DBStore) IsSessionRevoked(tokenHash string) bool {
+	if tokenHash == "" {
+		return false
+	}
+	var isActive int
+	err := s.db.QueryRow(`SELECT is_active FROM user_sessions WHERE token_hash = ?`, tokenHash).Scan(&isActive)
+	if err != nil {
+		return false
+	}
+	return isActive == 0
+}
+
+// RevokeAllSessionsExceptToken terminates all active sessions except the specified token hash
+func (s *DBStore) RevokeAllSessionsExceptToken(tokenHash string) error {
+	_, err := s.db.Exec("UPDATE user_sessions SET is_active = 0 WHERE token_hash != ?", tokenHash)
+	return err
+}

@@ -69,6 +69,7 @@ type Website struct {
 	HSTSEnabled  bool               `json:"hsts_enabled"`
 	LinkedDBID   int64              `json:"linked_db_id,omitempty"`
 	LinkedDBName string             `json:"linked_db_name,omitempty"`
+	DeepDiagnosticsEnabled bool           `json:"deep_diagnostics_enabled"` // On-demand deep error diagnostic agent
 	Status              string             `json:"status"` // active, suspended, provisioning
 	TrackingID          string             `json:"tracking_id"`
 	SiteTitle           string             `json:"site_title,omitempty"`
@@ -190,18 +191,40 @@ type ServerMetric struct {
 }
 
 // User represents an authenticated administrative user
+// UserSession represents an active user login session with hardware & IP tracking
+type UserSession struct {
+	ID         string    `json:"id"`
+	UserID     int64     `json:"user_id"`
+	Username   string    `json:"username"`
+	Role       string    `json:"role"`
+	IPAddress  string    `json:"ip_address"`
+	MACAddress string    `json:"mac_address"`
+	UserAgent  string    `json:"user_agent"`
+	DeviceInfo string    `json:"device_info"`
+	Location   string    `json:"location"`
+	TokenHash  string    `json:"-"`
+	IsActive   bool      `json:"is_active"`
+	IsCurrent  bool      `json:"is_current"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastActive string    `json:"last_active"`
+}
+
+// User represents an authenticated administrative user
 type User struct {
-	ID           int64     `json:"id"`
-	Username     string    `json:"username"`
-	PasswordHash string    `json:"-"`
-	Role         string    `json:"role"` // admin, operator, viewer
-	CreatedAt    time.Time `json:"created_at"`
+	ID               int64     `json:"id"`
+	Username         string    `json:"username"`
+	PasswordHash     string    `json:"-"`
+	Role             string    `json:"role"` // admin, operator, viewer
+	TwoFactorEnabled bool      `json:"two_factor_enabled"`
+	TwoFactorSecret  string    `json:"-"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 // AuthRequest handles login payload
 type AuthRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username      string `json:"username"`
+	Password      string `json:"password"`
+	TwoFactorCode string `json:"two_factor_code,omitempty"`
 }
 
 // AuthResponse returns token and user details
@@ -212,6 +235,18 @@ type AuthResponse struct {
 }
 
 // ErrorDiagnostic represents an incident for Advanced Error Analysis
+type DiagnosticTarget struct {
+	DomainName             string    `json:"domain_name"`
+	DocumentRoot           string    `json:"document_root"`
+	SiteType               string    `json:"site_type"`
+	PHPVersion             string    `json:"php_version"`
+	DeepDiagnosticsEnabled bool      `json:"deep_diagnostics_enabled"`
+	Status                 string    `json:"status"`
+	LastAnalysisTime       time.Time `json:"last_analysis_time,omitempty"`
+	IncidentCount          int       `json:"incident_count"`
+	ServerLoadLevel        string    `json:"server_load_level"`
+}
+
 type ErrorDiagnostic struct {
 	ID                 int64     `json:"id"`
 	IncidentID         string    `json:"incident_id"`

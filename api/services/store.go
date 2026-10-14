@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	"strings"
 
 	"hoatzingenz-protection/api/models"
 )
@@ -34,240 +35,6 @@ func NewMemoryStore() *MemoryStore {
 		serverMetrics:    make([]models.ServerMetric, 0),
 	}
 
-	// Seed error analysis diagnostics
-	store.errorDiagnostics = append(store.errorDiagnostics,
-		models.ErrorDiagnostic{
-			ID:               101,
-			IncidentID:       "inc_01H89X201A",
-			RequestID:        "req_8819A91B",
-			DomainName:       "hoatzinlabs.com",
-			ErrorType:        "PHP_FATAL",
-			Severity:         "CRITICAL",
-			Category:         "Reliability",
-			Message:          "Fatal error: Uncaught Error: Call to undefined function wp_remote_post() in /var/www/html/hoatzinlabs.com/wp-content/plugins/analytics/core.php:33",
-			File:             "/var/www/html/hoatzinlabs.com/wp-content/plugins/analytics/core.php",
-			Line:             33,
-			StackTrace:       "#0 /var/www/html/hoatzinlabs.com/wp-settings.php(450): include_once()\n#1 /var/www/html/hoatzinlabs.com/wp-config.php(90): require_once()\n#2 /var/www/html/hoatzinlabs.com/index.php(17): require()",
-			ConfidenceScore:  0.98,
-			AIRootCause:      "Plugin 'analytics' invoked `wp_remote_post()` before WordPress HTTP API was loaded during early initialization hook.",
-			RemediationSteps: []string{"Wrap call in `plugins_loaded` hook", "Check if function exists before execution", "Deactivate plugin 'analytics' v1.2"},
-			CreatedAt:        time.Now().Add(-15 * time.Minute),
-		},
-		models.ErrorDiagnostic{
-			ID:               102,
-			IncidentID:       "inc_01H89X202B",
-			RequestID:        "req_9921C32D",
-			DomainName:       "cloud-wordpress.org",
-			ErrorType:        "MEMORY_EXHAUSTED",
-			Severity:         "ERROR",
-			Category:         "Performance",
-			Message:          "Allowed memory size of 268435456 bytes exhausted (tried to allocate 134217728 bytes) in /var/www/html/cloud-wordpress.org/wp-includes/plugin.php:204",
-			File:             "/var/www/html/cloud-wordpress.org/wp-includes/plugin.php",
-			Line:             204,
-			StackTrace:       "#0 /var/www/html/cloud-wordpress.org/wp-content/plugins/seo/sitemap.php(112): do_action()\n#1 /var/www/html/cloud-wordpress.org/index.php(20): require()",
-			ConfidenceScore:  0.94,
-			AIRootCause:      "Sitemap generator plugin attempted to load 50,000 posts into a single PHP array without chunking or pagination.",
-			RemediationSteps: []string{"Increase php.ini memory_limit to 512M", "Enable post chunking in SEO plugin config", "Clear sitemap cache"},
-			CreatedAt:        time.Now().Add(-45 * time.Minute),
-		},
-		models.ErrorDiagnostic{
-			ID:               103,
-			IncidentID:       "inc_01H89X203C",
-			RequestID:        "req_4412F55E",
-			DomainName:       "api-service.dev",
-			ErrorType:        "SLOW_QUERY",
-			Severity:         "WARNING",
-			Category:         "Performance",
-			Message:          "Query execution latency breached threshold (3.42s > 0.50s): SELECT * FROM orders WHERE status = 'pending' ORDER BY created_at DESC",
-			File:             "/var/www/html/api-service.dev/app/Repositories/OrderRepository.php",
-			Line:             88,
-			StackTrace:       "#0 /var/www/html/api-service.dev/app/Http/Controllers/OrderController.php(34): OrderRepository->getPending()",
-			ConfidenceScore:  0.96,
-			AIRootCause:      "Missing composite database index on `orders(status, created_at)` causing a full table scan over 1.2M rows.",
-			RemediationSteps: []string{"Add index: CREATE INDEX idx_orders_status_created ON orders(status, created_at DESC);", "Optimize query SELECT fields"},
-			CreatedAt:        time.Now().Add(-90 * time.Minute),
-		},
-		models.ErrorDiagnostic{
-			ID:               104,
-			IncidentID:       "inc_01H89X204WP",
-			RequestID:        "req_7721A04F",
-			DomainName:       "wp-pro-success.local",
-			ErrorType:        "PHP_FATAL",
-			Severity:         "CRITICAL",
-			Category:         "Reliability",
-			Message:          "Fatal error: Uncaught Error: Call to undefined function wc_get_order() in /var/www/html/wp-pro-success.local/wp-content/plugins/custom-gateway/gateway.php:35",
-			File:             "/var/www/html/wp-pro-success.local/wp-content/plugins/custom-gateway/gateway.php",
-			Line:             35,
-			StackTrace:       "#0 /var/www/html/wp-pro-success.local/trigger_error.php(6): CustomPaymentGateway->processPayment(Array)\n#1 /var/www/html/wp-pro-success.local/wp-content/themes/twentytwentyfour/functions.php(102): CustomPaymentGateway->processPayment(Array)\n#2 /var/www/html/wp-pro-success.local/wp-includes/class-wp-hook.php(324): {closure}()\n#3 /var/www/html/wp-pro-success.local/wp-includes/class-wp-hook.php(348): WP_Hook->apply_filters()\n#4 /var/www/html/wp-pro-success.local/wp-includes/plugin.php(517): WP_Hook->do_action()\n#5 /var/www/html/wp-pro-success.local/wp-settings.php(695): do_action('init')\n#6 /var/www/html/wp-pro-success.local/wp-config.php(32): require_once('/var/www/html/wp-pro-success.local/wp-settings.php')\n#7 /var/www/html/wp-pro-success.local/index.php(17): require('/var/www/html/wp-pro-success.local/wp-blog-header.php')\n#8 {main}",
-			ConfidenceScore:  0.99,
-			AIRootCause:      "WooCommerce order API function `wc_get_order()` was called inside payment gateway execution before WooCommerce plugin was verified as active or before the 'woocommerce_loaded' lifecycle hook was dispatched.",
-			RemediationSteps: []string{
-				"Add `function_exists('wc_get_order')` guard condition before attempting to retrieve orders",
-				"Ensure payment gateway initialization is deferred until the `plugins_loaded` or `woocommerce_loaded` action hook",
-				"Activate WooCommerce plugin or declare proper plugin dependency headers in gateway manifest",
-			},
-			CreatedAt:        time.Now().Add(-5 * time.Minute),
-		},
-	)
-
-	// Seed sample initial website
-	store.websites = append(store.websites, models.Website{
-		ID:           1,
-		TeamID:       1,
-		DomainName:   "hoatzinlabs.com",
-		DocumentRoot: "/var/www/html/hoatzinlabs.com",
-		PHPVersion:   "8.3",
-		SiteType:     "wordpress",
-		SSLEnabled:   true,
-		SSLProvider:  "letsencrypt",
-		SSLAutoRenew: true,
-		SSLIssuer:    "Let's Encrypt Authority X3",
-		SSLExpiresAt: "2026-12-31 23:59:59",
-		ForceHTTPS:   true,
-		HSTSEnabled:  true,
-		LinkedDBName: "wp_hoatzin_prod",
-		Status:       "active",
-		TrackingID:   "trk_demo_123456",
-		PHPSettings: models.PHPSettings{
-			MemoryLimit:       "256M",
-			UploadMaxFilesize: "64M",
-			MaxExecutionTime:  300,
-			DisplayErrors:     false,
-			OpcacheEnabled:    true,
-		},
-		Security: models.SiteSecurityConfig{
-			WebsiteID:         1,
-			DomainName:        "hoatzinlabs.com",
-			WAFEnabled:        true,
-			BlockSQLi:         true,
-			BlockXSS:          true,
-			ForceHTTPS:        true,
-			HSTSEnabled:       true,
-			HotlinkProtection: true,
-			BasicAuthEnabled:  false,
-		},
-		CreatedAt: time.Now(),
-	})
-
-	// Seed initial cron jobs
-	store.cronJobs = append(store.cronJobs,
-		models.CronJob{
-			ID:         1,
-			WebsiteID:  1,
-			DomainName: "hoatzinlabs.com",
-			Schedule:   "*/15 * * * *",
-			Command:    "php /var/www/html/hoatzinlabs.com/wp-cron.php",
-			Active:     true,
-			LastRun:    time.Now().Add(-10 * time.Minute).Format("15:04:05"),
-			CreatedAt:  time.Now(),
-		},
-	)
-	store.databases = append(store.databases,
-		models.ServerDatabase{
-			ID:            1,
-			TeamID:        1,
-			Name:          "wp_hoatzin_prod",
-			Engine:        "mysql",
-			Host:          "127.0.0.1",
-			Port:          3306,
-			Charset:       "utf8mb4",
-			Collate:       "utf8mb4_unicode_ci",
-			Username:      "wp_user_prod",
-			ConnectionURI: "mysql://wp_user_prod:secret@127.0.0.1:3306/wp_hoatzin_prod",
-			SizeMB:        48.5,
-			Status:        "active",
-			CreatedAt:     time.Now(),
-		},
-		models.ServerDatabase{
-			ID:            2,
-			TeamID:        1,
-			Name:          "laravel_app_db",
-			Engine:        "postgresql",
-			Host:          "127.0.0.1",
-			Port:          5432,
-			Charset:       "utf8",
-			Collate:       "en_US.UTF-8",
-			Username:      "pg_laravel_user",
-			ConnectionURI: "postgresql://pg_laravel_user:secret@127.0.0.1:5432/laravel_app_db?sslmode=disable",
-			SizeMB:        124.2,
-			Status:        "active",
-			CreatedAt:     time.Now(),
-		},
-		models.ServerDatabase{
-			ID:            3,
-			TeamID:        1,
-			Name:          "analytics_store",
-			Engine:        "mongodb",
-			Host:          "127.0.0.1",
-			Port:          27017,
-			Charset:       "utf8",
-			Collate:       "binary",
-			Username:      "mongo_analytics",
-			ConnectionURI: "mongodb://mongo_analytics:secret@127.0.0.1:27017/analytics_store",
-			SizeMB:        310.8,
-			Status:        "active",
-			CreatedAt:     time.Now(),
-		},
-		models.ServerDatabase{
-			ID:            4,
-			TeamID:        1,
-			Name:          "cache_session_db",
-			Engine:        "redis",
-			Host:          "127.0.0.1",
-			Port:          6379,
-			Charset:       "binary",
-			Username:      "default",
-			ConnectionURI: "redis://:secret_pass@127.0.0.1:6379/0",
-			SizeMB:        18.4,
-			Status:        "active",
-			CreatedAt:     time.Now(),
-		},
-		models.ServerDatabase{
-			ID:            5,
-			TeamID:        1,
-			Name:          "app_embedded.sqlite",
-			Engine:        "sqlite",
-			Host:          "local",
-			Port:          0,
-			Charset:       "utf8",
-			Username:      "system",
-			ConnectionURI: "file:///var/www/html/hoatzinlabs.com/data/app_embedded.sqlite",
-			SizeMB:        5.2,
-			Status:        "active",
-			CreatedAt:     time.Now(),
-		},
-	)
-
-	store.mailDomains = append(store.mailDomains, models.MailDomain{
-		ID:        1,
-		TeamID:    1,
-		Name:      "hoatzinlabs.com",
-		Status:    "verified",
-		CreatedAt: time.Now(),
-	})
-
-	store.mailboxes = append(store.mailboxes, models.Mailbox{
-		ID:        1,
-		DomainID:  1,
-		LocalPart: "supports",
-		Address:   "supports@hoatzinlabs.com",
-		QuotaMB:   2048,
-		Active:    true,
-		CreatedAt: time.Now(),
-	})
-
-	store.serverMetrics = append(store.serverMetrics, models.ServerMetric{
-		ID:          1,
-		ServerID:    "srv_prod_01",
-		CPUPercent:  12.4,
-		RAMPercent:  38.2,
-		DiskPercent: 24.8,
-		Load1Min:    0.45,
-		Load5Min:    0.50,
-		Load15Min:   0.48,
-		CreatedAt:   time.Now(),
-	})
-
 	return store
 }
 
@@ -295,6 +62,42 @@ func (s *MemoryStore) AddWebsite(w models.Website) models.Website {
 	}
 	s.websites = append(s.websites, w)
 	return w
+}
+
+
+func (s *MemoryStore) SetWebsiteDeepDiagnostics(domain string, enabled bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.websites {
+		if strings.EqualFold(s.websites[i].DomainName, domain) {
+			s.websites[i].DeepDiagnosticsEnabled = enabled
+			return true
+		}
+	}
+	return false
+}
+
+func (s *MemoryStore) GetWebsiteDeepDiagnostics(domain string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for i := range s.websites {
+		if strings.EqualFold(s.websites[i].DomainName, domain) {
+			return s.websites[i].DeepDiagnosticsEnabled
+		}
+	}
+	return false
+}
+
+func (s *MemoryStore) UpdateWebsiteStatus(domain string, status string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.websites {
+		if strings.EqualFold(s.websites[i].DomainName, domain) {
+			s.websites[i].Status = status
+			return true
+		}
+	}
+	return false
 }
 
 func (s *MemoryStore) DeleteWebsite(id int64) bool {
@@ -356,6 +159,19 @@ func (s *MemoryStore) AddDatabase(db models.ServerDatabase) models.ServerDatabas
 	db.Status = "active"
 	s.databases = append(s.databases, db)
 	return db
+}
+
+func (s *MemoryStore) UpdateDatabasePassword(name, newPassword, newURI string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.databases {
+		if strings.EqualFold(s.databases[i].Name, name) {
+			s.databases[i].Password = newPassword
+			s.databases[i].ConnectionURI = newURI
+			return true
+		}
+	}
+	return false
 }
 
 func (s *MemoryStore) DeleteDatabase(id int64) bool {

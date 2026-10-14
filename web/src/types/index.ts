@@ -9,7 +9,8 @@ export interface Website {
   ssl_enabled: boolean;
   ssl_issuer?: string;
   ssl_auto_renew?: boolean;
-  status: 'active' | 'deploying' | 'error' | 'suspended';
+  deep_diagnostics_enabled?: boolean;
+  status: 'active' | 'deploying' | 'error' | 'suspended' | 'inactive' | 'deactivated';
   created_at: string;
   db_name?: string;
   db_user?: string;

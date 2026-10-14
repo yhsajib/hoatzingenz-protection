@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import {
   Bug,
+  Zap,
+  Cpu,
+  Power,
+  Sliders,
   Code,
   Sparkles,
   FileCode,
@@ -47,6 +51,16 @@ interface ErrorAnalysisTabProps {
   showToast: (msg: string) => void;
 }
 
+interface DiagnosticTarget {
+  domain_name: string;
+  document_root: string;
+  site_type: string;
+  php_version: string;
+  deep_diagnostics_enabled: boolean;
+  status: string;
+  server_load_level: string;
+}
+
 interface SnippetLine {
   line_number: number;
   code: string;
@@ -65,12 +79,63 @@ export const ErrorAnalysisTab: React.FC<ErrorAnalysisTabProps> = ({
   const [codeSnippet, setCodeSnippet] = useState<SnippetLine[]>([]);
   const [loadingSnippet, setLoadingSnippet] = useState<boolean>(false);
   const [copiedFilePath, setCopiedFilePath] = useState<boolean>(false);
-  const [simulatingError, setSimulatingError] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [domainFilter, setDomainFilter] = useState<string>('all');
   const [isRemediating, setIsRemediating] = useState<boolean>(false);
   const [remediatedIncidents, setRemediatedIncidents] = useState<Record<string, boolean>>({});
+  const [diagnosticTargets, setDiagnosticTargets] = useState<DiagnosticTarget[]>([]);
+  const [loadingTargets, setLoadingTargets] = useState<boolean>(false);
+  const [togglingDomain, setTogglingDomain] = useState<string | null>(null);
+
+  const fetchDiagnosticTargets = async () => {
+    setLoadingTargets(true);
+    try {
+      const res = await fetch(`${apiBase}/api/v1/diagnostics/targets`, {
+        headers: getHeaders(),
+      });
+      const data = await res.json();
+      if (res.ok && data.data) {
+        setDiagnosticTargets(data.data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch diagnostic targets:', err);
+    } finally {
+      setLoadingTargets(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDiagnosticTargets();
+  }, []);
+
+  const handleToggleDiagnosticTarget = async (domain: string, currentEnabled: boolean) => {
+    setTogglingDomain(domain);
+    const newEnabled = !currentEnabled;
+    try {
+      const res = await fetch(`${apiBase}/api/v1/diagnostics/targets`, {
+        method: 'POST',
+        headers: {
+          ...getHeaders(),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ domain, enabled: newEnabled }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(data.message || `Deep Diagnostic Agent ${newEnabled ? 'enabled' : 'disabled'} for ${domain}`);
+        fetchDiagnosticTargets();
+        onRefresh();
+      } else {
+        alert(data.error || 'Failed to update diagnostic agent target');
+      }
+    } catch {
+      alert('Error connecting to diagnostic target API');
+    } finally {
+      setTogglingDomain(null);
+    }
+  };
+
 
   // When an incident is selected, fetch code snippet
   useEffect(() => {
@@ -123,31 +188,39 @@ export const ErrorAnalysisTab: React.FC<ErrorAnalysisTabProps> = ({
     ]);
   };
 
-  const handleSimulateTestError = async (errorType: string, domainName: string = 'wp-pro-success.local') => {
-    setSimulatingError(true);
+  const [scanningLive, setScanningLive] = useState<boolean>(false);
+
+  const handleScanLiveErrors = async (domainName?: string) => {
+    setScanningLive(true);
+    const targetDomain = domainName || (diagnosticTargets.find((t) => t.deep_diagnostics_enabled)?.domain_name || 'wp-pro-success.local');
     try {
       const res = await fetch(`${apiBase}/api/v1/diagnostics/errors`, {
         method: 'POST',
-        headers: getHeaders(),
+        headers: {
+          ...getHeaders(),
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
-          action: 'simulate_test_error',
-          error_type: errorType,
-          domain_name: domainName,
+          action: 'scan_live_errors',
+          domain_name: targetDomain,
         }),
       });
       const data = await res.json();
-      if (res.ok && data.incident) {
-        showToast(`Simulated code-level error triggered on ${domainName}!`);
+      if (res.ok) {
+        if (data.clean) {
+          showToast(`Live Diagnostic Scan: No active errors detected on ${targetDomain}.`);
+        } else if (data.incident) {
+          showToast(`Captured live error incident on ${targetDomain}!`);
+          setSelectedIncident(data.incident);
+        }
         onRefresh();
-        // Automatically open the new incident in code inspector
-        setSelectedIncident(data.incident);
       } else {
-        alert(data.error || 'Failed to simulate test error');
+        alert(data.error || 'Failed to scan live errors');
       }
     } catch {
-      alert('Error triggering test incident');
+      alert('Error connecting to diagnostic log scanner');
     } finally {
-      setSimulatingError(false);
+      setScanningLive(false);
     }
   };
 
@@ -231,33 +304,15 @@ export const ErrorAnalysisTab: React.FC<ErrorAnalysisTabProps> = ({
             <span>Refresh</span>
           </button>
 
-          {/* Test Error Simulator Dropdown / Action */}
-          <div className="relative flex items-center gap-2">
-            <button
-              disabled={simulatingError}
-              onClick={() => handleSimulateTestError('WP_PRO_FATAL', 'wp-pro-success.local')}
-              className="bg-gradient-to-r from-purple-500 via-indigo-600 to-rose-600 hover:from-purple-400 hover:to-rose-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition-all shadow-lg shadow-purple-500/25 flex items-center gap-2 cursor-pointer disabled:opacity-50"
-            >
-              <Bug className="w-4 h-4 text-purple-200 animate-pulse" />
-              <span>{simulatingError ? 'Simulating...' : 'Test wp-pro-success.local'}</span>
-            </button>
-            <button
-              disabled={simulatingError}
-              onClick={() => handleSimulateTestError('PHP_FATAL', 'hoatzinlabs.com')}
-              className="bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-slate-950 font-bold px-3.5 py-2.5 rounded-xl text-xs transition-all shadow-lg shadow-amber-500/25 flex items-center gap-2 cursor-pointer disabled:opacity-50"
-            >
-              <Code className="w-4 h-4" />
-              <span>{simulatingError ? 'Simulating...' : 'Test hoatzinlabs.com'}</span>
-            </button>
-            <button
-              disabled={simulatingError}
-              onClick={() => handleSimulateTestError('SQL_SYNTAX_ERROR')}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold px-3 py-2.5 rounded-xl text-xs border border-slate-700 transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              <Terminal className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Test SQL Error</span>
-            </button>
-          </div>
+          {/* Live Diagnostic Scan Action */}
+          <button
+            disabled={scanningLive}
+            onClick={() => handleScanLiveErrors()}
+            className="bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-slate-950 font-extrabold px-4 py-2.5 rounded-xl text-xs transition-all shadow-lg shadow-cyan-500/25 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+          >
+            <Activity className={`w-4 h-4 text-slate-950 ${scanningLive ? 'animate-spin' : ''}`} />
+            <span>{scanningLive ? 'Scanning Live Logs...' : 'Run Live Diagnostic Scan'}</span>
+          </button>
         </div>
       </div>
 
@@ -319,6 +374,159 @@ export const ErrorAnalysisTab: React.FC<ErrorAnalysisTabProps> = ({
             <span className="text-xs font-semibold text-emerald-400">1-Click Auto Fix</span>
           </div>
           <p className="text-[11px] text-slate-400">Autonomous restart & patch recommendations</p>
+        </div>
+      </div>
+
+      {/* SPECIAL ERROR DIAGNOSTIC AGENT - ON-DEMAND TARGETED LOAD-BALANCED CONTROLLER */}
+      <div className="bg-gradient-to-br from-slate-900/90 via-slate-900/80 to-slate-950 p-6 rounded-2xl border border-cyan-500/30 shadow-2xl space-y-5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-800/80">
+          <div className="flex items-start gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 font-bold shrink-0 shadow-lg shadow-cyan-500/10">
+              <Zap className="w-5 h-5 text-cyan-400" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h3 className="font-extrabold text-lg text-white tracking-tight flex items-center gap-2">
+                  <span>Special Error Diagnostic Agent Controller</span>
+                </h3>
+                {diagnosticTargets.some((t) => t.deep_diagnostics_enabled) ? (
+                  <span className="bg-emerald-500/10 text-emerald-400 text-[11px] font-bold px-3 py-0.5 rounded-full border border-emerald-500/30 flex items-center gap-1.5 shadow-sm">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    TARGETED INSPECTION ACTIVE
+                  </span>
+                ) : (
+                  <span className="bg-slate-800 text-slate-300 text-[11px] font-semibold px-3 py-0.5 rounded-full border border-slate-700 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-slate-500"></span>
+                    STANDBY (0% OVERHEAD)
+                  </span>
+                )}
+                <span className="bg-cyan-500/10 text-cyan-400 text-[11px] font-mono px-2.5 py-0.5 rounded-md border border-cyan-500/20">
+                  Load Balancer Active
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-1 max-w-3xl leading-relaxed">
+                By default, the deep error diagnostic agent is <strong className="text-white">disabled across all websites</strong> to balance server resources and keep panel load ultra-low. When troubleshooting a website, enable deep diagnostics for that specific site below to capture live execution traces, AST source code lines, and real root-cause analytics without slowing down other websites.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5 shrink-0 self-start lg:self-center">
+            <button
+              onClick={fetchDiagnosticTargets}
+              disabled={loadingTargets}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3.5 py-2 rounded-xl border border-slate-700 flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-cyan-400 ${loadingTargets ? 'animate-spin' : ''}`} />
+              <span>Refresh Targets</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Target Websites Grid */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between text-xs text-slate-400 px-1">
+            <span className="font-semibold uppercase tracking-wider text-[11px]">Manageable Target Websites ({diagnosticTargets.length})</span>
+            <span className="text-[11px] text-cyan-400/90 font-medium">Click toggle to activate deep analysis on any specific website</span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {diagnosticTargets.length === 0 ? (
+              <div className="col-span-full py-8 text-center text-slate-400 text-xs bg-slate-950/40 rounded-xl border border-slate-800/80">
+                Loading website diagnostic targets...
+              </div>
+            ) : (
+              diagnosticTargets.map((target) => {
+                const isEnabled = target.deep_diagnostics_enabled;
+                const isToggling = togglingDomain === target.domain_name;
+
+                return (
+                  <div
+                    key={target.domain_name}
+                    className={`p-4 rounded-xl border transition-all duration-200 relative overflow-hidden ${
+                      isEnabled
+                        ? 'bg-slate-900/90 border-cyan-500/50 shadow-lg shadow-cyan-500/10'
+                        : 'bg-slate-950/60 border-slate-800/80 hover:border-slate-700'
+                    }`}
+                  >
+                    {isEnabled && (
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none -mr-8 -mt-8"></div>
+                    )}
+
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="font-bold text-sm text-white truncate max-w-[200px]" title={target.domain_name}>
+                            {target.domain_name}
+                          </h4>
+                          <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                            {target.site_type || 'wordpress'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 font-mono truncate" title={target.document_root}>
+                          {target.document_root}
+                        </p>
+                      </div>
+
+                      {/* Status Tag */}
+                      <span
+                        className={`text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full border shrink-0 flex items-center gap-1 ${
+                          isEnabled
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                            : 'bg-slate-800/80 text-slate-400 border-slate-700'
+                        }`}
+                      >
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            isEnabled ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
+                          }`}
+                        ></span>
+                        {isEnabled ? 'Active' : 'Standby'}
+                      </span>
+                    </div>
+
+                    <div className="mt-3.5 pt-3 border-t border-slate-800/60 flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-slate-400">
+                        {isEnabled ? (
+                          <span className="text-cyan-400 font-medium">Deep AST & process tracer active</span>
+                        ) : (
+                          <span className="text-slate-500">Resource saver (0% overhead)</span>
+                        )}
+                      </span>
+
+                      <button
+                        disabled={isToggling}
+                        onClick={() => handleToggleDiagnosticTarget(target.domain_name, isEnabled)}
+                        className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer shadow-sm ${
+                          isEnabled
+                            ? 'bg-slate-800 hover:bg-rose-950/60 text-rose-300 border border-rose-500/40 hover:border-rose-400'
+                            : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-extrabold shadow-cyan-500/20'
+                        } disabled:opacity-50`}
+                      >
+                        <Power className="w-3.5 h-3.5" />
+                        <span>{isToggling ? 'Updating...' : isEnabled ? 'Deactivate' : 'Enable Deep Agent'}</span>
+                      </button>
+                    </div>
+
+                    {isEnabled && (
+                      <div className="mt-2.5 pt-2 border-t border-slate-800/40 flex items-center gap-2">
+                        <button
+                          disabled={scanningLive}
+                          onClick={() => {
+                            setDomainFilter(target.domain_name);
+                            handleScanLiveErrors(target.domain_name);
+                          }}
+                          className="w-full text-[11px] bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 font-semibold py-1 px-2.5 rounded border border-cyan-500/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                        >
+                          <Activity className="w-3 h-3" />
+                          <span>Scan Live Server & PHP Error Logs</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
 
@@ -399,7 +607,7 @@ export const ErrorAnalysisTab: React.FC<ErrorAnalysisTabProps> = ({
                         <CheckCircle2 className="w-6 h-6 text-emerald-400" />
                       </div>
                       <p className="text-sm font-medium text-slate-300">No runtime error incidents recorded</p>
-                      <p className="text-xs text-slate-500">Click "Test PHP Fatal Error" above to simulate a live code-level failure.</p>
+                      <p className="text-xs text-slate-500">All monitored websites and services are operating normally. Click "Run Live Diagnostic Scan" to inspect live logs.</p>
                     </div>
                   </td>
                 </tr>
@@ -661,7 +869,7 @@ export const ErrorAnalysisTab: React.FC<ErrorAnalysisTabProps> = ({
                     </div>
                     <pre className="bg-slate-900/80 p-3 rounded-lg border border-slate-800/80 text-slate-300 font-mono text-[11px] overflow-x-auto leading-relaxed">
                       {selectedIncident.stack_trace ||
-                        '#0 /var/www/html/hoatzinlabs.com/wp-settings.php(450): include_once()\n#1 /var/www/html/hoatzinlabs.com/wp-config.php(90): require_once()\n#2 /var/www/html/hoatzinlabs.com/index.php(17): require()'}
+                        'No execution call stack frames recorded for this incident.'}
                     </pre>
                   </div>
                 </div>

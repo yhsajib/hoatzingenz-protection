@@ -14,6 +14,15 @@ export async function fetchDatabases(): Promise<DatabaseItem[]> {
   return res.json();
 }
 
+export async function exportAllDatabases(format: 'zip' | 'sql' = 'zip'): Promise<Blob> {
+  const token = localStorage.getItem('hz_token');
+  const res = await fetch(`${API_BASE}/api/v1/databases/export-all?format=${format}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error('Failed to export all databases');
+  return res.blob();
+}
+
 export async function fetchServices(): Promise<ServiceStatus[]> {
   const res = await fetch(`${API_BASE}/api/v1/services`);
   if (!res.ok) throw new Error('Failed to fetch services');
@@ -322,5 +331,22 @@ export async function fetchSystemSparklines(): Promise<any> {
 export async function fetchDomainBandwidth(domain: string): Promise<any> {
   const res = await fetch(`${API_BASE}/api/v1/monitoring/bandwidth?domain=${encodeURIComponent(domain)}`);
   if (!res.ok) return { bandwidth: { human_size: '0 MB', request_count: 0 } };
+  return res.json();
+}
+
+export async function changeDatabasePassword(name: string, password: string, username?: string): Promise<any> {
+  const token = localStorage.getItem('hz_token');
+  const res = await fetch(`${API_BASE}/api/v1/database/change-password`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ name, password, username }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to change database password');
+  }
   return res.json();
 }

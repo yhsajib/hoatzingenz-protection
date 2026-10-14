@@ -7,12 +7,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"text/template"
 
 	"hoatzingenz-protection/api/models"
 )
 
 func (v *VHostAutomationEngine) fpmPoolDirForPHP(phpVer string) string {
+	if v.FPMPoolDir != "" && !strings.HasPrefix(v.FPMPoolDir, "/etc/php") {
+		return v.FPMPoolDir
+	}
 	if phpVer == "" {
 		phpVer = "8.3"
 	}

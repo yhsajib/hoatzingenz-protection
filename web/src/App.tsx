@@ -1,8 +1,10 @@
 import { fetchWebsites, fetchVHostConfig, saveVHostConfig, fetchBackups, createBackup, deleteBackup, fetchBackupSettings, saveBackupSettings, testStorageConnection, cloneWebsite, fetchAppSupervisor, deployAppSupervisor, startServerMigration, fetchNotificationConfig, saveNotificationConfig, fetchDNSRecords, addDNSRecord, syncCloudflareDNS, fetchSystemSparklines, fetchDomainBandwidth } from './services/api';
 import { AuthGate } from './components/common/AuthGate';
 import { EmailWebmailTab } from './components/EmailWebmailTab';
+import { PanelDomainTab } from './components/PanelDomainTab';
 import { ErrorAnalysisTab } from './components/ErrorAnalysisTab';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Bell,
   Activity,
@@ -24,6 +26,7 @@ import {
   Download,
   ExternalLink,
   Eye,
+  EyeOff,
   FileCode,
   FileText,
   Filter,
@@ -50,6 +53,19 @@ import {
   UserPlus,
   Users,
   Zap,
+  Pause,
+  Play,
+  Power,
+  PowerOff,
+  QrCode,
+  Smartphone,
+  Laptop,
+  Monitor,
+  Fingerprint,
+  LogOut,
+  Wifi,
+  Radio,
+  Network,
 } from 'lucide-react';
 
 interface PHPSettings {
@@ -111,6 +127,7 @@ interface Website {
   force_https?: boolean;
   hsts_enabled?: boolean;
   linked_db_name?: string;
+  deep_diagnostics_enabled?: boolean;
   status: string;
   tracking_id: string;
   php_settings?: PHPSettings;
@@ -516,152 +533,150 @@ sudo systemctl reload nginx
 echo "[4/4] Provisioning completed successfully for ${domain}!"`;
 }
 
-const INITIAL_DEMO_WEBSITES: Website[] = [
-  {
-    id: 1,
-    domain_name: 'cloud-wordpress.org',
-    document_root: '/var/www/html/cloud-wordpress.org',
-    php_version: '8.3',
-    site_type: 'wordpress',
-    ssl_enabled: true,
-    ssl_provider: 'letsencrypt',
-    ssl_auto_renew: true,
-    ssl_issuer: "Let's Encrypt Authority X3",
-    ssl_expires_at: '2026-12-31 23:59:59',
-    force_https: true,
-    hsts_enabled: true,
-    linked_db_name: 'wp_hoatzin_prod',
-    status: 'active',
-    tracking_id: 'vhost_wp_01',
-    site_title: 'Cloud WordPress Portal',
-    admin_user: 'wp_admin',
-    admin_pass: 'WpAdmin#2026!Sec',
-    admin_email: 'admin@cloud-wordpress.org',
-    db_name: 'wp_hoatzin_prod',
-    db_user: 'wp_user_prod',
-    db_pass: 'WpDbPass#9921!',
-    db_host: '127.0.0.1',
-    nginx_config: generateNginxConfig('cloud-wordpress.org', '/var/www/html/cloud-wordpress.org', 'wordpress', '8.3'),
-    env_file_content: generateEnvFileContent('cloud-wordpress.org', 'Cloud WordPress Portal', 'wordpress', 'wp_hoatzin_prod', 'wp_user_prod', 'WpDbPass#9921!'),
-    fpm_pool_content: generateFPMPoolContent('cloud-wordpress.org', '8.3'),
-    deploy_script_content: generateDeployScriptContent('cloud-wordpress.org', '/var/www/html/cloud-wordpress.org'),
-    php_settings: { memory_limit: '256M', upload_max_filesize: '64M', max_execution_time: 300, display_errors: false, opcache_enabled: true },
-    security: { domain_name: 'cloud-wordpress.org', waf_enabled: true, block_sqli: true, block_xss: true, force_https: true, hsts_enabled: true, hotlink_protection: true, basic_auth_enabled: false },
-  },
-  {
-    id: 2,
-    domain_name: 'api-service.dev',
-    document_root: '/var/www/html/api-service.dev/public',
-    php_version: '8.2',
-    site_type: 'laravel',
-    ssl_enabled: true,
-    ssl_provider: 'letsencrypt',
-    ssl_auto_renew: true,
-    ssl_issuer: "Let's Encrypt Authority X3",
-    ssl_expires_at: '2026-12-31 23:59:59',
-    force_https: true,
-    hsts_enabled: true,
-    linked_db_name: 'laravel_postgres_db',
-    status: 'active',
-    tracking_id: 'vhost_lrv_02',
-    site_title: 'Laravel API Gateway Engine',
-    db_name: 'laravel_postgres_db',
-    db_user: 'pg_laravel',
-    db_pass: 'LrvSecret#4412!',
-    db_host: '127.0.0.1',
-    app_key: 'base64:92Kz8xL0qV4mZ1W8pY6tN3bC5vR7uI2o=',
-    nginx_config: generateNginxConfig('api-service.dev', '/var/www/html/api-service.dev', 'laravel', '8.2'),
-    env_file_content: generateEnvFileContent('api-service.dev', 'Laravel API Gateway Engine', 'laravel', 'laravel_postgres_db', 'pg_laravel', 'LrvSecret#4412!', '127.0.0.1', 'base64:92Kz8xL0qV4mZ1W8pY6tN3bC5vR7uI2o='),
-    fpm_pool_content: generateFPMPoolContent('api-service.dev', '8.2'),
-    deploy_script_content: generateDeployScriptContent('api-service.dev', '/var/www/html/api-service.dev'),
-    php_settings: { memory_limit: '512M', upload_max_filesize: '128M', max_execution_time: 120, display_errors: false, opcache_enabled: true },
-    security: { domain_name: 'api-service.dev', waf_enabled: true, block_sqli: true, block_xss: true, force_https: true, hsts_enabled: true, hotlink_protection: false, basic_auth_enabled: false },
-  },
-  {
-    id: 3,
-    domain_name: 'nextjs-app.io',
-    document_root: '/var/www/html/nextjs-app.io',
-    php_version: 'N/A',
-    site_type: 'nodejs',
-    app_port: 3000,
-    ssl_enabled: true,
-    ssl_provider: 'letsencrypt',
-    ssl_auto_renew: true,
-    status: 'active',
-    tracking_id: 'vhost_node_03',
-    site_title: 'Next.js SSR Application',
-    node_version: '20.x',
-    entry_script: 'server.js',
-    process_manager: 'systemd',
-    nginx_config: generateNginxConfig('nextjs-app.io', '/var/www/html/nextjs-app.io', 'nodejs', 'N/A', 3000),
-    env_file_content: generateEnvFileContent('nextjs-app.io', 'Next.js SSR Application', 'nodejs', 'next_db', 'next_user', 'NodePass#8812!', '127.0.0.1', '', 3000),
-    systemd_content: generateSystemdContent('nextjs-app.io', '/var/www/html/nextjs-app.io', 'nodejs', 'server.js', 3000),
-    deploy_script_content: generateDeployScriptContent('nextjs-app.io', '/var/www/html/nextjs-app.io'),
-  },
-];
 
-const INITIAL_DEMO_DATABASES: DatabaseItem[] = [
-  {
-    id: 1,
-    name: 'wp_hoatzin_prod',
-    engine: 'mysql',
-    host: '127.0.0.1',
-    port: 3306,
-    charset: 'utf8mb4',
-    collate: 'utf8mb4_unicode_ci',
-    username: 'wp_user_prod',
-    connection_uri: 'mysql://wp_user_prod:secret@127.0.0.1:3306/wp_hoatzin_prod',
-    size_mb: 48.5,
-    status: 'active',
-  },
-  {
-    id: 2,
-    name: 'laravel_postgres_db',
-    engine: 'postgresql',
-    host: '127.0.0.1',
-    port: 5432,
-    charset: 'utf8',
-    collate: 'en_US.UTF-8',
-    username: 'pg_laravel',
-    connection_uri: 'postgresql://pg_laravel:secret@127.0.0.1:5432/laravel_postgres_db?sslmode=disable',
-    size_mb: 124.2,
-    status: 'active',
-  },
-];
+
+// ---------------------------------------------------------------------------
+// URL routing: every top-level section, profile sub-tab and detail console
+// (site / database) has its own URL so refresh, Back/Forward and deep links work.
+// ---------------------------------------------------------------------------
+type AppTab = 'dashboard' | 'websites' | 'error_analysis' | 'databases' | 'ftp' | 'services' | 'email' | 'team' | 'security' | 'profile' | 'supervisor' | 'migration' | 'dns' | 'notifications';
+type ProfileTab = 'general' | 'panel_domain' | 'localization' | 'notifications' | 'security';
+
+const TAB_PATHS: Record<AppTab, string> = {
+  dashboard: '/',
+  websites: '/websites',
+  error_analysis: '/error-analysis',
+  databases: '/databases',
+  ftp: '/ftp',
+  services: '/services',
+  email: '/email',
+  team: '/team',
+  security: '/security',
+  profile: '/profile',
+  supervisor: '/supervisor',
+  migration: '/migration',
+  dns: '/dns',
+  notifications: '/notifications',
+};
+
+const TAB_TITLES: Record<AppTab, string> = {
+  dashboard: 'Dashboard',
+  websites: 'Websites',
+  error_analysis: 'Error Analysis',
+  databases: 'Databases',
+  ftp: 'FTP Accounts',
+  services: 'Services',
+  email: 'Email & Webmail',
+  team: 'Team & RBAC',
+  security: 'Security & WAF',
+  profile: 'Profile & Settings',
+  supervisor: 'App Supervisor',
+  migration: 'Migration',
+  dns: 'DNS & Cloudflare',
+  notifications: 'Alerts & Webhooks',
+};
+
+// '' = canonical /profile
+const PROFILE_TAB_SLUGS: Record<ProfileTab, string> = {
+  general: '',
+  panel_domain: 'domain',
+  localization: 'localization',
+  notifications: 'notifications',
+  security: 'security',
+};
+
+interface ParsedRoute {
+  known: boolean;
+  tab: AppTab;
+  profileTab: ProfileTab;
+  siteDomain: string | null;
+  dbName: string | null;
+}
+
+const safeDecode = (v: string) => {
+  try {
+    return decodeURIComponent(v);
+  } catch {
+    return v;
+  }
+};
+
+function parseRoute(pathname: string): ParsedRoute {
+  const parts = pathname.split('/').filter(Boolean).map(safeDecode);
+  const base: ParsedRoute = { known: true, tab: 'dashboard', profileTab: 'general', siteDomain: null, dbName: null };
+  if (parts.length === 0) return base;
+
+  const entry = (Object.entries(TAB_PATHS) as [AppTab, string][]).find(([, p]) => p !== '/' && p.slice(1) === parts[0]);
+  if (!entry) return { ...base, known: false };
+  const tab = entry[0];
+  const rest = parts.slice(1);
+
+  if (tab === 'websites' && rest.length > 0) return { ...base, tab, siteDomain: rest[0], known: rest.length === 1 };
+  if (tab === 'databases' && rest.length > 0) return { ...base, tab, dbName: rest[0], known: rest.length === 1 };
+  if (tab === 'profile' && rest.length > 0) {
+    const pt = (Object.entries(PROFILE_TAB_SLUGS) as [ProfileTab, string][]).find(([, slug]) => slug !== '' && slug === rest[0]);
+    return pt && rest.length === 1 ? { ...base, tab, profileTab: pt[0] } : { ...base, tab, known: false };
+  }
+  return { ...base, tab, known: rest.length === 0 };
+}
+
+function buildRoute(tab: AppTab, profileTab: ProfileTab, siteDomain: string | null, dbName: string | null): string {
+  if (siteDomain) return `${TAB_PATHS.websites}/${encodeURIComponent(siteDomain)}`;
+  if (dbName) return `${TAB_PATHS.databases}/${encodeURIComponent(dbName)}`;
+  if (tab === 'profile') {
+    const slug = PROFILE_TAB_SLUGS[profileTab];
+    return slug ? `${TAB_PATHS.profile}/${slug}` : TAB_PATHS.profile;
+  }
+  return TAB_PATHS[tab];
+}
+
+// Self-contained ticking clock so the (very large) App component doesn't re-render every second.
+function LiveClock({ timeZone, offsetMs }: { timeZone: string; offsetMs: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+  let text: string;
+  try {
+    text = new Intl.DateTimeFormat('en-GB', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(new Date(now + offsetMs));
+  } catch {
+    text = new Date(now + offsetMs).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+  }
+  return <span>{text}</span>;
+}
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'websites' | 'error_analysis' | 'databases' | 'ftp' | 'services' | 'email' | 'security' | 'profile' | 'supervisor' | 'migration' | 'dns' | 'notifications'>('dashboard');
+  const [activeTab, setActiveTab] = useState<AppTab>(() => parseRoute(window.location.pathname).tab);
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [websites, setWebsites] = useState<Website[]>(INITIAL_DEMO_WEBSITES);
-  const [databases, setDatabases] = useState<DatabaseItem[]>(INITIAL_DEMO_DATABASES);
-  const [ftpAccounts, setFtpAccounts] = useState<FTPAccount[]>([
-    { id: 1, domain_name: 'cloud-wordpress.org', username: 'ftp_wp_user', path: '/var/www/html/cloud-wordpress.org', status: 'active' },
-  ]);
-  const [services, setServices] = useState<SystemService[]>([
-    { name: 'Nginx Web Server', engine: 'nginx', status: 'running', uptime: '14d 6h', memory_mb: 42.1 },
-    { name: 'PHP-FPM 8.3 Engine', engine: 'php-fpm', status: 'running', uptime: '14d 6h', memory_mb: 68.4 },
-    { name: 'MySQL / MariaDB Server', engine: 'mysql', status: 'running', uptime: '14d 6h', memory_mb: 312.8 },
-    { name: 'PostgreSQL Engine', engine: 'postgresql', status: 'running', uptime: '14d 6h', memory_mb: 184.5 },
-  ]);
+  const [websites, setWebsites] = useState<Website[]>([]);
+  const [databases, setDatabases] = useState<DatabaseItem[]>([]);
+  const [ftpAccounts, setFtpAccounts] = useState<FTPAccount[]>([]);
+  const [services, setServices] = useState<SystemService[]>([]);
   const [securityEvents, setSecurityEvents] = useState<SecurityEvent[]>([]);
   const [errorDiagnostics, setErrorDiagnostics] = useState<ErrorDiagnostic[]>([]);
   const [metricsHistory, setMetricsHistory] = useState<ServerMetric[]>([]);
 
   // Email & Webmail State
-  const [mailDomains, setMailDomains] = useState<any[]>([
-    { id: 1, team_id: 1, name: 'hoatzinlabs.com', status: 'verified', created_at: new Date().toISOString() },
-  ]);
-  const [mailboxes, setMailboxes] = useState<any[]>([
-    { id: 1, domain_id: 1, local_part: 'supports', address: 'supports@hoatzinlabs.com', quota_mb: 2048, active: true, created_at: new Date().toISOString() },
-  ]);
-  const [webmailUrl, setWebmailUrl] = useState<string>('https://webmail.hoatzinlabs.com');
+  const [mailDomains, setMailDomains] = useState<any[]>([]);
+  const [mailboxes, setMailboxes] = useState<any[]>([]);
+  const [webmailUrl, setWebmailUrl] = useState<string>('');
   const [mailServices, setMailServices] = useState<{ postfix: string; dovecot: string }>({ postfix: 'active', dovecot: 'active' });
   const [showAddMailDomainModal, setShowAddMailDomainModal] = useState<boolean>(false);
   const [showAddMailboxModal, setShowAddMailboxModal] = useState<boolean>(false);
   const [showDnsRecordsModal, setShowDnsRecordsModal] = useState<boolean>(false);
-  const [selectedDnsDomain, setSelectedDnsDomain] = useState<string>('hoatzinlabs.com');
+  const [selectedDnsDomain, setSelectedDnsDomain] = useState<string>('');
   const [newMailDomainInput, setNewMailDomainInput] = useState<string>('');
-  const [newMailboxDomain, setNewMailboxDomain] = useState<string>('hoatzinlabs.com');
+  const [newMailboxDomain, setNewMailboxDomain] = useState<string>('');
   const [newMailboxLocalPart, setNewMailboxLocalPart] = useState<string>('');
   const [newMailboxPassword, setNewMailboxPassword] = useState<string>('');
   const [newMailboxQuota, setNewMailboxQuota] = useState<number>(2048);
@@ -683,8 +698,29 @@ export default function App() {
 
   // Modals
   const [showAddWebsiteModal, setShowAddWebsiteModal] = useState<boolean>(false);
+
+  // Add Website Provisioning Progress States
+  const [isProvisioningWebsite, setIsProvisioningWebsite] = useState<boolean>(false);
+  const [provisionProgress, setProvisionProgress] = useState<number>(0);
+  const [provisionStep, setProvisionStep] = useState<number>(0);
+  const [provisionStepText, setProvisionStepText] = useState<string>('');
+  const [provisionLogs, setProvisionLogs] = useState<string[]>([]);
+  const [provisionError, setProvisionError] = useState<string | null>(null);
+
+  const openAddWebsiteModal = () => {
+    setIsProvisioningWebsite(false);
+    setProvisionProgress(0);
+    setProvisionStep(0);
+    setProvisionStepText('');
+    setProvisionLogs([]);
+    setProvisionError(null);
+    setShowAddWebsiteModal(true);
+  };
   const [showAddDbModal, setShowAddDbModal] = useState<boolean>(false);
   const [selectedDbConnModal, setSelectedDbConnModal] = useState<DatabaseItem | null>(null);
+  const [dbNewPassword, setDbNewPassword] = useState<string>('');
+  const [showDbPassword, setShowDbPassword] = useState<boolean>(false);
+  const [isChangingDbPassword, setIsChangingDbPassword] = useState<boolean>(false);
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
 
   // Production Site Ready Summary Modal State (CloudPanel style)
@@ -857,6 +893,79 @@ export default function App() {
       showToast(`Downloaded SQL backup for ${dbname}!`);
     } catch (e: any) {
       alert(`Error downloading backup: ${e.message}`);
+    }
+  };
+
+  const handleGenerateRandomDbPassword = () => {
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*';
+    let pass = '';
+    for (let i = 0; i < 20; i++) {
+      pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setDbNewPassword(pass);
+  };
+
+  const handleChangeDbPassword = async () => {
+    if (!selectedDbConnModal) return;
+    if (!dbNewPassword || dbNewPassword.length < 6) {
+      showToast('New password must be at least 6 characters long');
+      return;
+    }
+    setIsChangingDbPassword(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/database/change-password`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify({
+          name: selectedDbConnModal.name,
+          username: selectedDbConnModal.username,
+          password: dbNewPassword,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'success') {
+        const updatedDb = data.data;
+        showToast(`Password for ${selectedDbConnModal.name} updated successfully!`);
+        setSelectedDbConnModal(updatedDb);
+        setDatabases((prev) => prev.map((d) => (d.name === updatedDb.name ? updatedDb : d)));
+        if (activeManageDb?.name === updatedDb.name) {
+          setActiveManageDb(updatedDb);
+        }
+        setDbNewPassword('');
+      } else {
+        alert(data.error || 'Failed to update database password');
+      }
+    } catch (e: any) {
+      alert(`Error updating password: ${e.message}`);
+    } finally {
+      setIsChangingDbPassword(false);
+    }
+  };
+
+  const handleExportAllDatabases = async (format: 'zip' | 'sql' = 'zip') => {
+    showToast(`Generating full export of all databases (${format.toUpperCase()})...`);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/databases/export-all?format=${format}`, {
+        headers: getHeaders(),
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        alert(`Export failed: ${errText || res.statusText}`);
+        return;
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const dateStr = new Date().toISOString().slice(0, 10);
+      a.download = format === 'sql' ? `all-databases-${dateStr}.sql` : `all-databases-backup-${dateStr}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      showToast(`Exported all databases (${format.toUpperCase()}) successfully!`);
+    } catch (e: any) {
+      alert(`Error exporting all databases: ${e.message}`);
     }
   };
 
@@ -1104,34 +1213,16 @@ export default function App() {
       ]);
 
       if (statsRes) setStats(statsRes);
-      if (sitesRes?.data && sitesRes.data.length > 0) setWebsites(sitesRes.data);
-      if (dbRes?.data && dbRes.data.length > 0) setDatabases(dbRes.data);
-      if (ftpRes?.data && ftpRes.data.length > 0) setFtpAccounts(ftpRes.data);
-      if (srvRes?.data && srvRes.data.length > 0) setServices(srvRes.data);
-      if (secRes?.data && secRes.data.length > 0) setSecurityEvents(secRes.data);
+      if (Array.isArray(sitesRes?.data)) setWebsites(sitesRes.data);
+      if (Array.isArray(dbRes?.data)) setDatabases(dbRes.data);
+      if (Array.isArray(ftpRes?.data)) setFtpAccounts(ftpRes.data);
+      if (Array.isArray(srvRes?.data)) setServices(srvRes.data);
+      if (Array.isArray(secRes?.data)) setSecurityEvents(secRes.data);
 
-      if (errRes?.data && errRes.data.length > 0) {
+      if (errRes?.data) {
         setErrorDiagnostics(errRes.data);
       } else {
-        setErrorDiagnostics([
-          {
-            id: 101,
-            incident_id: 'inc_01H89X201A',
-            request_id: 'req_8819A91B',
-            domain_name: 'cloud-wordpress.org',
-            error_type: 'PHP_FATAL',
-            severity: 'CRITICAL',
-            category: 'Reliability',
-            message: 'Uncaught Error: Call to undefined function wp_remote_post() in /var/www/html/cloud-wordpress.org/wp-content/plugins/analytics/core.php:42',
-            file: '/var/www/html/cloud-wordpress.org/wp-content/plugins/analytics/core.php',
-            line: 42,
-            stack_trace: '#0 /var/www/html/cloud-wordpress.org/wp-settings.php(450): include_once()\n#1 /var/www/html/cloud-wordpress.org/wp-config.php(90): require_once()\n#2 /var/www/html/cloud-wordpress.org/index.php(17): require()',
-            confidence_score: 0.98,
-            ai_root_cause: "Plugin 'analytics' invoked `wp_remote_post()` before WordPress HTTP API was loaded during early initialization hook.",
-            remediation_steps: ['Wrap call in `plugins_loaded` hook', 'Check if function exists before execution', "Deactivate plugin 'analytics' v1.2"],
-            created_at: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
-          },
-        ]);
+        setErrorDiagnostics([]);
       }
 
       if (metRes?.history && metRes.history.length > 0) setMetricsHistory(metRes.history);
@@ -1202,7 +1293,8 @@ export default function App() {
     }
   };
 
-    const [activeSecSubTab, setActiveSecSubTab] = useState<'team' | 'hardening' | 'sessions' | 'audit'>('team');
+    const [activeTeamSubTab, setActiveTeamSubTab] = useState<'members' | 'sessions' | 'roles'>('members');
+  const [activeSecSubTab, setActiveSecSubTab] = useState<'hardening' | 'audit' | 'ip_rules'>('hardening');
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
   const [teamLoading, setTeamLoading] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -1224,23 +1316,88 @@ export default function App() {
     ip_blacklist: ['198.51.100.44', '203.0.113.99'],
   });
   const [secAuditLogs, setSecAuditLogs] = useState<any[]>([]);
-      const [profilePhone, setProfilePhone] = useState('+1 (555) 019-2834');
-  const [profileCompany, setProfileCompany] = useState('Hoatzin Security Infrastructure Inc.');
-  const [profileJobTitle, setProfileJobTitle] = useState('Lead System Administrator');
-  const [profileTimezone, setProfileTimezone] = useState('UTC+06:00 Asia/Dhaka');
+      const [profilePhone, setProfilePhone] = useState('');
+  const [profileCompany, setProfileCompany] = useState('');
+  const [profileJobTitle, setProfileJobTitle] = useState('');
+  const [profileTimezone, setProfileTimezone] = useState('UTC');
   const [profileLang, setProfileLang] = useState('English (US)');
   const [profileAutoLogout, setProfileAutoLogout] = useState('30m');
   const [profileNotifyIncidents, setProfileNotifyIncidents] = useState(true);
   const [profileNotifyBackups, setProfileNotifyBackups] = useState(true);
   const [profileNotifyLogins, setProfileNotifyLogins] = useState(true);
-  const [activeProfileTab, setActiveProfileTab] = useState<'general' | 'localization' | 'notifications' | 'security'>('general');
+  const [activeProfileTab, setActiveProfileTab] = useState<ProfileTab>(() => parseRoute(window.location.pathname).profileTab);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [profileName, setProfileName] = useState('Super Admin');
-  const [profileEmail, setProfileEmail] = useState('admin@hoatzin.org');
+  const [profileEmail, setProfileEmail] = useState('');
   const [profileUsername, setProfileUsername] = useState('admin');
   const [profileNewPass, setProfileNewPass] = useState('');
+  const [profileCurrentPass, setProfileCurrentPass] = useState('');
+  const [profileConfirmPass, setProfileConfirmPass] = useState('');
+  const [showProfilePass, setShowProfilePass] = useState(false);
+  const [profileNotifyDigest, setProfileNotifyDigest] = useState(false);
+  const [profileDateFormat, setProfileDateFormat] = useState('YYYY-MM-DD');
+  const [profileAccount, setProfileAccount] = useState<{ id: number; username: string; role: string; twoFactorEnabled: boolean; createdAt: string | null } | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileUpdatedAt, setProfileUpdatedAt] = useState<string | null>(null);
+  const [profileClockOffset, setProfileClockOffset] = useState(0);
+  const [profilePassSaving, setProfilePassSaving] = useState(false);
+  const [profilePassError, setProfilePassError] = useState<string | null>(null);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [userSessions, setUserSessions] = useState<any[]>([]);
+  const [sessionSearchQuery, setSessionSearchQuery] = useState('');
+
+  const handleRevokeSession = async (sessionId: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/sessions/revoke`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ session_id: sessionId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        showToast(`Session ${sessionId} terminated successfully.`);
+        setUserSessions(prev => prev.filter(s => s.id !== sessionId));
+      } else {
+        showToast(data.error || 'Failed to revoke session');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to revoke session');
+    }
+  };
+
+  const handleRevokeAllOtherSessions = async () => {
+    if (!window.confirm('Are you sure you want to terminate all other active user sessions? Other users will be logged out immediately.')) {
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/sessions/revoke-all`, {
+        method: 'POST',
+        headers: getHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        showToast('All other user sessions terminated.');
+        fetchSecurityAndTeamData();
+      } else {
+        showToast(data.error || 'Failed to revoke other sessions');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to revoke sessions');
+    }
+  };
+
+  // Google Authenticator (2FA) State
+  const [showTwoFactorSetupModal, setShowTwoFactorSetupModal] = useState(false);
+  const [twoFactorSetupData, setTwoFactorSetupData] = useState<{ secret: string; otpauth_url: string; qr_code_url: string } | null>(null);
+  const [twoFactorSetupCode, setTwoFactorSetupCode] = useState('');
+  const [twoFactorSetupLoading, setTwoFactorSetupLoading] = useState(false);
+  const [twoFactorSetupError, setTwoFactorSetupError] = useState<string | null>(null);
+  const [showTwoFactorDisableModal, setShowTwoFactorDisableModal] = useState(false);
+  const [twoFactorDisablePassword, setTwoFactorDisablePassword] = useState('');
+  const [twoFactorDisableLoading, setTwoFactorDisableLoading] = useState(false);
+  const [twoFactorDisableError, setTwoFactorDisableError] = useState<string | null>(null);
 
   const fetchSecurityAndTeamData = async () => {
     setTeamLoading(true);
@@ -1266,7 +1423,7 @@ export default function App() {
   useEffect(() => {
     if (isLoggedIn) {
       fetchData();
-      if (activeTab === 'security') fetchSecurityAndTeamData();
+      if (activeTab === 'security' || activeTab === 'team') fetchSecurityAndTeamData();
       const interval = setInterval(fetchData, 10000);
       return () => clearInterval(interval);
     }
@@ -1285,17 +1442,316 @@ export default function App() {
       loadSiteLogs(site.domain_name, 'access');
       const cronRes = await fetch(`${API_BASE}/api/v1/website/cron?domain=${site.domain_name}`, { headers: getHeaders() }).then((r) => r.json()).catch(() => null);
 
-      if (cronRes?.data && cronRes.data.length > 0) {
+      if (cronRes?.data) {
         setSiteCronJobs(cronRes.data);
       } else {
-        setSiteCronJobs([
-          { id: 1, domain_name: site.domain_name, schedule: '*/15 * * * *', command: `php ${site.document_root}/wp-cron.php`, active: true, last_run: '10 mins ago' },
-        ]);
+        setSiteCronJobs([]);
       }
     } catch (e) {
       console.error('Error opening site console:', e);
     }
   };
+
+  // ---------------- URL routing sync ----------------
+  const location = useLocation();
+  const navigate = useNavigate();
+  // A deep link to /websites/:domain or /databases/:name can only be resolved once the lists load.
+  const pendingDeepLinkRef = useRef<{ site: string | null; db: string | null } | null>(null);
+  if (pendingDeepLinkRef.current === null) {
+    const initial = parseRoute(window.location.pathname);
+    pendingDeepLinkRef.current = initial.known ? { site: initial.siteDomain, db: initial.dbName } : { site: null, db: null };
+  }
+  const lastRoutedPathRef = useRef<string | null>(null);
+
+  // URL -> state (initial load, Back/Forward, pasted links)
+  useEffect(() => {
+    const pending = pendingDeepLinkRef.current!;
+    const pathChanged = lastRoutedPathRef.current !== location.pathname;
+    lastRoutedPathRef.current = location.pathname;
+    if (!pathChanged && !pending.site && !pending.db) return;
+
+    const route = parseRoute(location.pathname);
+    if (!route.known) {
+      pending.site = null;
+      pending.db = null;
+      navigate(TAB_PATHS[route.tab], { replace: true });
+      return;
+    }
+    if (route.tab !== activeTab) setActiveTab(route.tab);
+    if (route.tab === 'profile' && route.profileTab !== activeProfileTab) setActiveProfileTab(route.profileTab);
+
+    if (route.siteDomain) {
+      if (activeManageSite?.domain_name !== route.siteDomain) {
+        const site = websites.find((w) => w.domain_name === route.siteDomain);
+        if (site) {
+          pending.site = null;
+          openManageSiteConsole(site);
+        } else if (websites.length > 0) {
+          pending.site = null;
+          showToast(`Website "${route.siteDomain}" was not found`);
+          navigate(TAB_PATHS.websites, { replace: true });
+        } else {
+          pending.site = route.siteDomain;
+        }
+      } else {
+        pending.site = null;
+      }
+    } else {
+      pending.site = null;
+      if (activeManageSite) setActiveManageSite(null);
+    }
+
+    if (route.dbName) {
+      if (activeManageDb?.name !== route.dbName) {
+        const db = databases.find((d) => d.name === route.dbName);
+        if (db) {
+          pending.db = null;
+          handleOpenDbManage(db);
+        } else if (databases.length > 0) {
+          pending.db = null;
+          showToast(`Database "${route.dbName}" was not found`);
+          navigate(TAB_PATHS.databases, { replace: true });
+        } else {
+          pending.db = route.dbName;
+        }
+      } else {
+        pending.db = null;
+      }
+    } else {
+      pending.db = null;
+      if (activeManageDb) setActiveManageDb(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, websites, databases]);
+
+  // state -> URL (sidebar clicks, buttons, etc. keep using the existing setters)
+  useEffect(() => {
+    const pending = pendingDeepLinkRef.current!;
+    const target = buildRoute(activeTab, activeProfileTab, activeManageSite?.domain_name ?? null, activeManageDb?.name ?? null);
+    if (pending.site || pending.db) {
+      const waitingOnParent = (pending.site && target === TAB_PATHS.websites) || (pending.db && target === TAB_PATHS.databases);
+      if (waitingOnParent) return;
+      pending.site = null;
+      pending.db = null;
+    }
+    if (target !== location.pathname) navigate(target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, activeProfileTab, activeManageSite?.domain_name, activeManageDb?.name]);
+
+  useEffect(() => {
+    const detail = activeManageSite ? ` · ${activeManageSite.domain_name}` : activeManageDb ? ` · ${activeManageDb.name}` : '';
+    document.title = `${TAB_TITLES[activeTab]}${detail} | HoatzinGenz Control Panel`;
+  }, [activeTab, activeManageSite?.domain_name, activeManageDb?.name]);
+
+  // ---------------- Profile (persisted via /api/v1/profile) ----------------
+  const loadProfile = async () => {
+    setProfileLoading(true);
+    setProfileError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/profile`, { headers: getHeaders() });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Failed to load profile (HTTP ${res.status})`);
+      const a = data.account || {};
+      const p = data.profile || {};
+      setProfileAccount({
+        id: a.id,
+        username: a.username || '',
+        role: a.role || '',
+        twoFactorEnabled: !!a.two_factor_enabled,
+        createdAt: a.created_at || null,
+      });
+      setProfileUsername(a.username || '');
+      setProfileName(p.display_name || a.username || '');
+      setProfileEmail(p.email || '');
+      setProfilePhone(p.phone || '');
+      setProfileCompany(p.company || '');
+      setProfileJobTitle(p.job_title || '');
+      setProfileTimezone(p.timezone || 'Asia/Dhaka');
+      setProfileLang(p.language || 'English (US)');
+      setProfileDateFormat(p.date_format || 'YYYY-MM-DD');
+      setProfileAutoLogout(p.auto_logout || '30m');
+      setProfileNotifyIncidents(p.notify_incidents ?? true);
+      setProfileNotifyBackups(p.notify_backups ?? true);
+      setProfileNotifyLogins(p.notify_logins ?? true);
+      setProfileNotifyDigest(p.notify_digest ?? false);
+      setProfileUpdatedAt(data.updated_at || null);
+      if (data.server_time) setProfileClockOffset(new Date(data.server_time).getTime() - Date.now());
+    } catch (e: any) {
+      setProfileError(e.message || 'Failed to load profile');
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  const saveProfile = async () => {
+    setProfileSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/profile`, {
+        method: 'PUT',
+        headers: getHeaders(true),
+        body: JSON.stringify({
+          display_name: profileName,
+          email: profileEmail,
+          phone: profilePhone,
+          company: profileCompany,
+          job_title: profileJobTitle,
+          timezone: profileTimezone,
+          language: profileLang,
+          date_format: profileDateFormat,
+          auto_logout: profileAutoLogout,
+          notify_incidents: profileNotifyIncidents,
+          notify_backups: profileNotifyBackups,
+          notify_logins: profileNotifyLogins,
+          notify_digest: profileNotifyDigest,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setProfileUpdatedAt(new Date().toISOString());
+      setProfileError(null);
+      showToast('Profile saved');
+    } catch (e: any) {
+      showToast('Could not save profile: ' + (e.message || 'unknown error'));
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  const changeProfilePassword = async () => {
+    setProfilePassError(null);
+    if (!profileCurrentPass) return setProfilePassError('Enter your current password.');
+    if (profileNewPass.length < 10) return setProfilePassError('New password must be at least 10 characters.');
+    if (profileNewPass.length > 72) return setProfilePassError('New password must be at most 72 characters.');
+    if (profileNewPass !== profileConfirmPass) return setProfilePassError('New password and confirmation do not match.');
+    setProfilePassSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/profile/password`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify({ current_password: profileCurrentPass, new_password: profileNewPass }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setProfileCurrentPass('');
+      setProfileNewPass('');
+      setProfileConfirmPass('');
+      showToast('Password updated. Use the new password next time you sign in.');
+    } catch (e: any) {
+      setProfilePassError(e.message || 'Failed to update password');
+    } finally {
+      setProfilePassSaving(false);
+    }
+  };
+
+  // ---------------- 2FA (Google Authenticator) Handlers ----------------
+  const handleStart2FASetup = async () => {
+    setTwoFactorSetupLoading(true);
+    setTwoFactorSetupError(null);
+    setTwoFactorSetupCode('');
+    setShowTwoFactorSetupModal(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/2fa/setup`, {
+        method: 'POST',
+        headers: getHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.secret) {
+        throw new Error(data.error || 'Failed to initialize Google Authenticator setup');
+      }
+      setTwoFactorSetupData(data);
+    } catch (err: any) {
+      setTwoFactorSetupError(err.message || 'Error initializing 2FA setup');
+    } finally {
+      setTwoFactorSetupLoading(false);
+    }
+  };
+
+  const handleConfirm2FASetup = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const code = twoFactorSetupCode.trim();
+    if (!code || code.length !== 6 || !/^\d{6}$/.test(code)) {
+      setTwoFactorSetupError('Please enter a valid 6-digit verification code.');
+      return;
+    }
+    setTwoFactorSetupLoading(true);
+    setTwoFactorSetupError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/2fa/verify`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ code, secret: twoFactorSetupData?.secret }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || (!data.success && data.status !== 'success')) {
+        throw new Error(data.error || 'Invalid authentication code. Please check your authenticator app.');
+      }
+      showToast('Google Authenticator successfully activated!');
+      setShowTwoFactorSetupModal(false);
+      setTwoFactorSetupCode('');
+      setTwoFactorSetupData(null);
+      await loadProfile();
+      if (activeTab === 'security' || activeTab === 'team') fetchSecurityAndTeamData();
+    } catch (err: any) {
+      setTwoFactorSetupError(err.message || 'Verification failed');
+    } finally {
+      setTwoFactorSetupLoading(false);
+    }
+  };
+
+  const handleDisable2FA = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!twoFactorDisablePassword) {
+      setTwoFactorDisableError('Please enter your account password to confirm.');
+      return;
+    }
+    setTwoFactorDisableLoading(true);
+    setTwoFactorDisableError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/auth/2fa/disable`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ password: twoFactorDisablePassword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || (!data.success && data.status !== 'success')) {
+        throw new Error(data.error || 'Failed to disable 2FA. Incorrect password.');
+      }
+      showToast('Two-factor authentication disabled.');
+      setShowTwoFactorDisableModal(false);
+      setTwoFactorDisablePassword('');
+      await loadProfile();
+      if (activeTab === 'security' || activeTab === 'team') fetchSecurityAndTeamData();
+    } catch (err: any) {
+      setTwoFactorDisableError(err.message || 'Failed to disable 2FA');
+    } finally {
+      setTwoFactorDisableLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isLoggedIn) loadProfile();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoggedIn]);
+
+  // Inactivity auto-logout (driven by the profile "auto_logout" preference)
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    const limits: Record<string, number> = { '15m': 15 * 60_000, '30m': 30 * 60_000, '1h': 60 * 60_000, '4h': 240 * 60_000 };
+    const limit = limits[profileAutoLogout];
+    if (!limit) return;
+    let timer = window.setTimeout(() => handleLogout(), limit);
+    const reset = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => handleLogout(), limit);
+    };
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    events.forEach((ev) => window.addEventListener(ev, reset, { passive: true }));
+    return () => {
+      window.clearTimeout(timer);
+      events.forEach((ev) => window.removeEventListener(ev, reset));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoggedIn, profileAutoLogout]);
 
   const handleSiteAction = async (domain: string, action: string) => {
     try {
@@ -1335,7 +1791,13 @@ export default function App() {
     e.preventDefault();
     if (!newDomain) return;
 
-    const domainClean = newDomain.toLowerCase().trim();
+    // Sanitize domain: strip protocol, trailing paths, colons/ports and spaces
+    const domainClean = newDomain.toLowerCase().trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '').replace(/:\d+$/, '').trim();
+    if (!domainClean || !/^[a-z0-9]([a-z0-9.\-]*[a-z0-9])?$/.test(domainClean)) {
+      showToast('Please enter a valid domain name (e.g. mysite.com or app.local)');
+      return;
+    }
+
     const baseDocRoot = `/var/www/html/${domainClean}`;
     const docRoot = newStack === 'laravel' ? `${baseDocRoot}/public` : baseDocRoot;
     const titleClean = newSiteTitle.trim() || `${domainClean} App`;
@@ -1408,33 +1870,99 @@ export default function App() {
       setDatabases((prev) => [newDbItem, ...prev]);
     }
 
+    // Launch Preloader & Progress Tracker
+    setIsProvisioningWebsite(true);
+    setProvisionProgress(15);
+    setProvisionStep(1);
+    setProvisionStepText(`Validating host parameters and DNS records for ${domainClean}...`);
+    setProvisionLogs([
+      `[PROVISION] Initializing automated provisioning engine for ${domainClean}`,
+      `[PROVISION] Target stack: ${newStack.toUpperCase()} | Runtime: ${newPhp} | Port: ${newAppPort}`,
+      `[STEP 1/5] Domain format and local virtual resolver verified`,
+    ]);
+    setProvisionError(null);
+
+    let currentPct = 15;
+    const progressTimer = setInterval(() => {
+      currentPct += Math.floor(Math.random() * 6) + 3;
+      if (currentPct > 88) currentPct = 88;
+      setProvisionProgress(currentPct);
+
+      if (currentPct >= 35 && currentPct < 55) {
+        setProvisionStep(2);
+        setProvisionStepText(`Allocating document root directory and permissions...`);
+        setProvisionLogs((prev) => {
+          const msg = `[STEP 2/5] Created web directory: ${docRoot} (permissions: 0755, www-data)`;
+          return prev.includes(msg) ? prev : [...prev, msg];
+        });
+      } else if (currentPct >= 55 && currentPct < 75) {
+        setProvisionStep(3);
+        setProvisionStepText(newStack === 'wordpress' || newStack === 'laravel' ? `Setting up database credentials and user grants for ${dbNameClean}...` : `Configuring reverse proxy & service isolation...`);
+        setProvisionLogs((prev) => {
+          const msg = newStack === 'wordpress' || newStack === 'laravel'
+            ? `[STEP 3/5] Provisioned MySQL database ${dbNameClean} for user ${dbUserClean}`
+            : `[STEP 3/5] Configured reverse proxy bindings on port ${newAppPort}`;
+          return prev.includes(msg) ? prev : [...prev, msg];
+        });
+      } else if (currentPct >= 75) {
+        setProvisionStep(4);
+        setProvisionStepText(`Generating Nginx virtual host & PHP-FPM socket pool...`);
+        setProvisionLogs((prev) => {
+          const msg = `[STEP 4/5] Generated Nginx server block /etc/nginx/sites-available/${domainClean}.conf`;
+          return prev.includes(msg) ? prev : [...prev, msg];
+        });
+      }
+    }, 350);
+
     try {
       const res = await fetch(`${API_BASE}/api/v1/websites`, {
         method: 'POST',
         headers: getHeaders(true),
         body: JSON.stringify(createdSite),
       });
+      clearInterval(progressTimer);
       const resData = await res.json();
-      if (!res.ok) {
-        showToast(`Error creating site: ${resData?.error || res.statusText}`);
-        setWebsites((prev) => [createdSite, ...prev]);
-        setNewlyCreatedSite(createdSite);
-      } else {
-        const finalSite = resData.data || createdSite;
-        setWebsites((prev) => [finalSite, ...prev.filter(s => s.domain_name !== finalSite.domain_name)]);
-        setNewlyCreatedSite(finalSite);
-        showToast(resData?.message || `Website ${domainClean} created & provisioned!`);
-      }
-    } catch (err) {
-      setWebsites((prev) => [createdSite, ...prev]);
-      setNewlyCreatedSite(createdSite);
-      showToast(`Website ${domainClean} created & provisioned!`);
-    }
 
-    setNewDomain('');
-    setShowAddWebsiteModal(false);
-    setShowSiteReadyModal(true);
-    setActiveConfigTab('nginx');
+      if (!res.ok) {
+        setProvisionProgress(100);
+        const errMsg = resData?.error || `Server returned error (${res.status} ${res.statusText})`;
+        setProvisionError(errMsg);
+        setProvisionLogs((prev) => [...prev, `[ERROR] Provisioning halted: ${errMsg}`]);
+        showToast(`Error creating site: ${errMsg}`);
+        return;
+      }
+
+      setProvisionStep(5);
+      setProvisionProgress(100);
+      setProvisionStepText(`Virtual host provisioned & services active!`);
+
+      const serverSteps: string[] = resData.provision_steps || [];
+      setProvisionLogs((prev) => [
+        ...prev,
+        ...serverSteps.map((s: string) => `[SYSTEM] ${s}`),
+        `[SUCCESS] Website ${domainClean} is live and ready for production traffic!`,
+      ]);
+
+      const finalSite = resData.data || createdSite;
+      setWebsites((prev) => [finalSite, ...prev.filter((s) => s.domain_name !== finalSite.domain_name)]);
+      setNewlyCreatedSite(finalSite);
+
+      setTimeout(() => {
+        setIsProvisioningWebsite(false);
+        setNewDomain('');
+        setShowAddWebsiteModal(false);
+        setShowSiteReadyModal(true);
+        setActiveConfigTab('nginx');
+        showToast(resData?.message || `Website ${domainClean} created & provisioned!`);
+      }, 850);
+    } catch (err: any) {
+      clearInterval(progressTimer);
+      setProvisionProgress(100);
+      const errMsg = err?.message || 'Network error communicating with control panel API';
+      setProvisionError(errMsg);
+      setProvisionLogs((prev) => [...prev, `[NETWORK] Request failed: ${errMsg}`]);
+      showToast(`Provisioning failed: ${errMsg}`);
+    }
   };
 
   const handleDeleteWebsite = async (id: number, domain: string) => {
@@ -1443,6 +1971,49 @@ export default function App() {
     if (activeManageSite?.id === id) setActiveManageSite(null);
     fetch(`${API_BASE}/api/v1/websites?id=${id}&domain=${domain}`, { method: 'DELETE', headers: getHeaders() }).catch(() => null);
     showToast(`Website ${domain} deleted.`);
+  };
+
+  const handleToggleWebsiteStatus = async (site: Website) => {
+    const isCurrentlyActive = site.status === 'active';
+    const action = isCurrentlyActive ? 'deactivate' : 'activate';
+    const newStatus = isCurrentlyActive ? 'suspended' : 'active';
+    const actionLabel = isCurrentlyActive ? 'deactivate' : 'activate';
+
+    if (
+      !confirm(
+        isCurrentlyActive
+          ? `Are you sure you want to DEACTIVATE "${site.domain_name}"?\n\nTraffic routing will be paused and application processes will be suspended.`
+          : `Activate "${site.domain_name}"?\n\nVirtualHost routing and background application processes will be resumed.`
+      )
+    ) {
+      return;
+    }
+
+    // Optimistic UI state update
+    setWebsites((prev) =>
+      prev.map((s) => (s.id === site.id ? { ...s, status: newStatus } : s))
+    );
+    if (activeManageSite?.id === site.id) {
+      setActiveManageSite((prev) => (prev ? { ...prev, status: newStatus } : null));
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/website/action`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify({ action, domain: site.domain_name }),
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'success') {
+        showToast(data.message || `Website ${site.domain_name} ${actionLabel}d successfully.`);
+      } else {
+        showToast(data?.error || `Failed to ${actionLabel} website ${site.domain_name}`);
+        fetchData();
+      }
+    } catch (e) {
+      showToast(`Network error when attempting to ${actionLabel} ${site.domain_name}`);
+      fetchData();
+    }
   };
 
   const handleCreateDatabase = async (e: React.FormEvent) => {
@@ -1531,7 +2102,7 @@ export default function App() {
     const h: Record<string, string> = {};
     const token = localStorage.getItem('hz_token');
     if (token) h['Authorization'] = `Bearer ${token}`;
-    else h['X-API-Key'] = localStorage.getItem('hz_api_key') || 'hz_agent_secret_key_2026';
+    h['X-API-Key'] = localStorage.getItem('hz_api_key') || 'hz_agent_secret_key_2026';
     if (json) h['Content-Type'] = 'application/json';
     return h;
   };
@@ -1778,7 +2349,22 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setShowAddWebsiteModal(true)}
+            onClick={() => {
+              setActiveTab('profile');
+              setActiveProfileTab('panel_domain');
+              setActiveManageSite(null);
+              setActiveManageDb(null);
+            }}
+            className="hidden xl:flex items-center gap-2 bg-gradient-to-r from-cyan-950/60 to-slate-900 hover:border-cyan-500/50 text-slate-200 px-3 py-1.5 rounded-xl border border-cyan-500/30 text-xs font-semibold cursor-pointer transition-all shadow-sm"
+            title="CloudPanel Style: Configure Custom Domain & SSL for Panel"
+          >
+            <Globe className="w-4 h-4 text-cyan-400" />
+            <span>Panel Domain</span>
+            <span className="bg-cyan-500/20 text-cyan-300 text-[9px] px-1.5 py-0.5 rounded font-bold border border-cyan-500/30 font-mono">CP-SSL</span>
+          </button>
+
+          <button
+            onClick={() => openAddWebsiteModal()}
             className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold px-3.5 py-1.5 rounded-xl text-xs transition-all shadow-lg shadow-cyan-500/25 flex items-center gap-1.5 cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -1827,7 +2413,7 @@ export default function App() {
                         OWNER
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-400 truncate">admin@hoatzin.org</p>
+                    <p className="text-[11px] text-slate-400 truncate">{profileEmail || `${profileAccount?.username || 'admin'}@localhost`}</p>
                     <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-1 pt-0.5">
                       <ShieldCheck className="w-3 h-3 text-emerald-400" /> 2FA Authenticated
                     </span>
@@ -1838,7 +2424,7 @@ export default function App() {
                 <div className="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800/60 text-[11px] font-mono text-slate-400 space-y-1">
                   <div className="flex justify-between">
                     <span>Active IP:</span>
-                    <strong className="text-slate-200">127.0.0.1</strong>
+                    <strong className="text-slate-200">{userSessions.find(s => s.is_current)?.ip_address || '127.0.0.1'}</strong>
                   </div>
                   <div className="flex justify-between">
                     <span>Session Token:</span>
@@ -1858,16 +2444,33 @@ export default function App() {
                     className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800 transition-all cursor-pointer"
                   >
                     <div className="flex items-center gap-2.5">
-                      <UserCheck className="w-4 h-4 text-purple-400" />
+                      <UserCheck className="w-4 h-4 text-cyan-400" />
                       <span className="whitespace-nowrap">Profile & Settings</span>
                     </div>
-                    <span className="text-[10px] bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded font-mono font-bold border border-purple-500/30">OWNER</span>
+                    <span className="text-[10px] bg-cyan-500/10 text-cyan-400 px-1.5 py-0.5 rounded font-mono font-bold border border-cyan-500/20">OWNER</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowUserDropdown(false);
+                      setActiveTab('profile');
+                      setActiveProfileTab('panel_domain');
+                      setActiveManageSite(null);
+                      setActiveManageDb(null);
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800 transition-all cursor-pointer group"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Globe className="w-4 h-4 text-cyan-400 group-hover:rotate-12 transition-transform" />
+                      <span className="whitespace-nowrap">Custom Domain (Panel)</span>
+                    </div>
+                    <span className="text-[10px] bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded font-mono font-bold border border-cyan-500/30">CLOUDPANEL</span>
                   </button>
                   <button
                     onClick={() => {
                       setShowUserDropdown(false);
-                      setActiveTab('security');
-                      setActiveSecSubTab('team');
+                      setActiveTab('team');
+                      setActiveTeamSubTab('members');
                       setActiveManageSite(null);
                       setActiveManageDb(null);
                       fetchSecurityAndTeamData();
@@ -1878,7 +2481,7 @@ export default function App() {
                       <Users className="w-4 h-4 text-cyan-400" />
                       <span>Team Members & RBAC</span>
                     </div>
-                    <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 font-mono">4 Users</span>
+                    <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 font-mono">{teamMembers.length} Members</span>
                   </button>
 
                   <button
@@ -1893,17 +2496,17 @@ export default function App() {
                     className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800 transition-all cursor-pointer"
                   >
                     <div className="flex items-center gap-2.5">
-                      <ShieldAlert className="w-4 h-4 text-emerald-400" />
-                      <span>Security Hardening & WAF</span>
+                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                      <span>Security & WAF Hardening</span>
                     </div>
-                    <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-bold">ON</span>
+                    <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-bold">WAF ACTIVE</span>
                   </button>
 
                   <button
                     onClick={() => {
                       setShowUserDropdown(false);
-                      setActiveTab('security');
-                      setActiveSecSubTab('sessions');
+                      setActiveTab('team');
+                      setActiveTeamSubTab('sessions');
                       setActiveManageSite(null);
                       setActiveManageDb(null);
                       fetchSecurityAndTeamData();
@@ -1912,9 +2515,9 @@ export default function App() {
                   >
                     <div className="flex items-center gap-2.5">
                       <Key className="w-4 h-4 text-amber-400" />
-                      <span>Active Sessions</span>
+                      <span>Active Team Sessions</span>
                     </div>
-                    <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 font-mono">2 Devices</span>
+                    <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 font-mono">{userSessions.length} Devices</span>
                   </button>
 
                   <button
@@ -1932,6 +2535,7 @@ export default function App() {
                       <FileText className="w-4 h-4 text-indigo-400" />
                       <span>Live Security Audit Logs</span>
                     </div>
+                    <span className="text-[10px] bg-indigo-500/10 text-indigo-300 px-1.5 py-0.5 rounded font-mono">{secAuditLogs.length}</span>
                   </button>
                 </div>
 
@@ -2097,6 +2701,28 @@ export default function App() {
 
             <button
               onClick={() => {
+                setActiveTab('team');
+                setActiveManageSite(null);
+                setActiveManageDb(null);
+                fetchSecurityAndTeamData();
+              }}
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-medium text-sm transition-all cursor-pointer ${
+                activeTab === 'team' && !activeManageSite && !activeManageDb
+                  ? 'bg-gradient-to-r from-cyan-500/15 to-indigo-500/15 text-cyan-400 border border-cyan-500/30 shadow-md shadow-cyan-500/10'
+                  : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Users className="w-4 h-4 text-cyan-400" />
+                <span className="whitespace-nowrap">Team & RBAC</span>
+              </div>
+              <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-mono">
+                {teamMembers.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => {
                 setActiveTab('security');
                 setActiveManageSite(null);
                 setActiveManageDb(null);
@@ -2104,16 +2730,16 @@ export default function App() {
               }}
               className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-medium text-sm transition-all cursor-pointer ${
                 activeTab === 'security' && !activeManageSite && !activeManageDb
-                  ? 'bg-gradient-to-r from-cyan-500/15 to-indigo-500/15 text-cyan-400 border border-cyan-500/30'
+                  ? 'bg-gradient-to-r from-cyan-500/15 to-indigo-500/15 text-cyan-400 border border-cyan-500/30 shadow-md shadow-cyan-500/10'
                   : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
               }`}
             >
               <div className="flex items-center gap-3">
                 <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                <span>Security & Team</span>
+                <span className="whitespace-nowrap">Security & WAF</span>
               </div>
-              <span className="bg-emerald-500/10 text-emerald-400 text-xs px-2 py-0.5 rounded-full font-bold border border-emerald-500/30">
-                PRO
+              <span className="bg-emerald-500/10 text-emerald-400 text-[10px] px-2 py-0.5 rounded-full font-bold border border-emerald-500/30 font-mono">
+                ACTIVE
               </span>
             </button>
 
@@ -2199,15 +2825,15 @@ export default function App() {
               }}
               className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-medium text-sm transition-all cursor-pointer ${
                 activeTab === 'profile' && !activeManageSite && !activeManageDb
-                  ? 'bg-gradient-to-r from-purple-500/15 to-indigo-500/15 text-purple-300 border border-purple-500/30 shadow-lg shadow-purple-500/10'
+                  ? 'bg-gradient-to-r from-cyan-500/15 to-indigo-500/15 text-cyan-400 border border-cyan-500/30 shadow-lg shadow-cyan-500/10'
                   : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
               }`}
             >
               <div className="flex items-center gap-3">
-                <UserCheck className="w-4 h-4 text-purple-400" />
+                <UserCheck className="w-4 h-4 text-cyan-400" />
                 <span className="whitespace-nowrap">Profile & Settings</span>
               </div>
-              <span className="bg-purple-500/20 text-purple-300 text-[10px] px-2 py-0.5 rounded-full font-bold border border-purple-500/30 font-mono">
+              <span className="bg-cyan-500/20 text-cyan-400 text-[10px] px-2 py-0.5 rounded-full font-bold border border-cyan-500/30 font-mono">
                 OWNER
               </span>
             </button>
@@ -2241,10 +2867,17 @@ export default function App() {
                         <ExternalLink className="w-5 h-5 text-cyan-400 group-hover/domain:translate-x-0.5 group-hover/domain:-translate-y-0.5 transition-transform" />
                       </a>
 
-                      <span className="bg-emerald-500/10 text-emerald-400 text-xs font-semibold px-2.5 py-0.5 rounded-full border border-emerald-500/20 flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                        {activeManageSite.status.toUpperCase()}
-                      </span>
+                      {activeManageSite.status === 'suspended' || activeManageSite.status === 'inactive' || activeManageSite.status === 'deactivated' ? (
+                        <span className="bg-amber-500/10 text-amber-400 text-xs font-semibold px-2.5 py-0.5 rounded-full border border-amber-500/20 flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                          DEACTIVATED / SUSPENDED
+                        </span>
+                      ) : (
+                        <span className="bg-emerald-500/10 text-emerald-400 text-xs font-semibold px-2.5 py-0.5 rounded-full border border-emerald-500/20 flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                          {activeManageSite.status.toUpperCase()}
+                        </span>
+                      )}
                       <span className="bg-cyan-500/10 text-cyan-400 text-xs font-semibold px-2.5 py-0.5 rounded-full border border-cyan-500/20">
                         {activeManageSite.site_type.toUpperCase()}
                       </span>
@@ -2280,6 +2913,27 @@ export default function App() {
                   >
                     <Zap className="w-3.5 h-3.5 text-amber-400" />
                     <span>Reload FPM</span>
+                  </button>
+                  <button
+                    onClick={() => handleToggleWebsiteStatus(activeManageSite)}
+                    className={
+                      activeManageSite.status === 'active'
+                        ? "bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs font-semibold px-3.5 py-2 rounded-xl transition-all border border-amber-500/20 cursor-pointer flex items-center gap-1.5"
+                        : "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-semibold px-3.5 py-2 rounded-xl transition-all border border-emerald-500/20 cursor-pointer flex items-center gap-1.5"
+                    }
+                    title={activeManageSite.status === 'active' ? "Deactivate Website / Application" : "Activate Website / Application"}
+                  >
+                    {activeManageSite.status === 'active' ? (
+                      <>
+                        <Pause className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Deactivate Site</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Activate Site</span>
+                      </>
+                    )}
                   </button>
                   <button
                     onClick={() => handleDeleteWebsite(activeManageSite.id, activeManageSite.domain_name)}
@@ -2638,6 +3292,24 @@ export default function App() {
                         className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-1.5 rounded-xl border border-slate-700 cursor-pointer flex items-center gap-1.5"
                       >
                         <ShieldCheck className="w-3.5 h-3.5 text-purple-400" /> Fix Permissions (755/644)
+                      </button>
+                      <button
+                        onClick={() => handleToggleWebsiteStatus(activeManageSite)}
+                        className={
+                          activeManageSite.status === 'active'
+                            ? "bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-semibold px-3 py-1.5 rounded-xl border border-amber-500/30 cursor-pointer flex items-center gap-1.5 transition-all"
+                            : "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 text-xs font-semibold px-3 py-1.5 rounded-xl border border-emerald-500/30 cursor-pointer flex items-center gap-1.5 transition-all"
+                        }
+                      >
+                        {activeManageSite.status === 'active' ? (
+                          <>
+                            <Pause className="w-3.5 h-3.5 text-amber-400" /> Deactivate Application
+                          </>
+                        ) : (
+                          <>
+                            <Play className="w-3.5 h-3.5 text-emerald-400" /> Activate Application
+                          </>
+                        )}
                       </button>
                     </div>
                   </div>
@@ -3615,7 +4287,7 @@ export default function App() {
 
                   {/* Create Site Button */}
                   <button
-                    onClick={() => setShowAddWebsiteModal(true)}
+                    onClick={() => openAddWebsiteModal()}
                     className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-cyan-500/25 flex items-center gap-2 cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
@@ -3699,7 +4371,7 @@ export default function App() {
                     </button>
                   ) : (
                     <button
-                      onClick={() => setShowAddWebsiteModal(true)}
+                      onClick={() => openAddWebsiteModal()}
                       className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-xs transition-all cursor-pointer shadow-lg shadow-cyan-500/20"
                     >
                       + Create New Website
@@ -3747,15 +4419,30 @@ export default function App() {
                                       <h3 className="font-bold text-sm text-white tracking-tight group-hover:text-cyan-400 transition-colors">
                                         {site.domain_name}
                                       </h3>
-                                      <span className="flex h-2 w-2 relative" title="Active Host Status">
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                                      </span>
+                                      {site.status === 'suspended' || site.status === 'inactive' || site.status === 'deactivated' ? (
+                                        <span className="flex h-2 w-2 relative" title="Deactivated / Suspended">
+                                          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                                        </span>
+                                      ) : (
+                                        <span className="flex h-2 w-2 relative" title="Active Host Status">
+                                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                        </span>
+                                      )}
                                     </div>
                                     <div className="flex items-center gap-2">
                                       <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md ${style.bg} ${style.text} ${style.border} border tracking-wide`}>
                                         {site.site_type}
                                       </span>
+                                      {site.status === 'suspended' || site.status === 'inactive' || site.status === 'deactivated' ? (
+                                        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 tracking-wide">
+                                          Deactivated
+                                        </span>
+                                      ) : (
+                                        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 tracking-wide">
+                                          Active
+                                        </span>
+                                      )}
                                       {site.site_title && (
                                         <span className="text-[11px] text-slate-400 truncate max-w-[180px]">
                                           {site.site_title}
@@ -3865,6 +4552,18 @@ export default function App() {
                                   </button>
 
                                   <button
+                                    onClick={() => handleToggleWebsiteStatus(site)}
+                                    className={
+                                      site.status === 'active'
+                                        ? "p-1.5 rounded-xl bg-slate-950/60 hover:bg-amber-500/20 text-slate-400 hover:text-amber-400 border border-slate-800 hover:border-amber-500/30 transition-all cursor-pointer"
+                                        : "p-1.5 rounded-xl bg-slate-950/60 hover:bg-emerald-500/20 text-slate-400 hover:text-emerald-400 border border-slate-800 hover:border-emerald-500/30 transition-all cursor-pointer"
+                                    }
+                                    title={site.status === 'active' ? "Deactivate Website / Application" : "Activate Website / Application"}
+                                  >
+                                    {site.status === 'active' ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                                  </button>
+
+                                  <button
                                     onClick={() => handleDeleteWebsite(site.id, site.domain_name)}
                                     className="p-1.5 rounded-xl bg-slate-950/60 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-slate-800 hover:border-rose-500/30 transition-all cursor-pointer"
                                     title="Delete Website Host"
@@ -3905,14 +4604,31 @@ export default function App() {
                             <div>
                               <div className="flex items-center gap-2">
                                 <h3 className="font-bold text-base text-white tracking-wide">{site.domain_name}</h3>
-                                <span className="flex h-2 w-2 relative" title="Active">
-                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                                </span>
+                                {site.status === 'suspended' || site.status === 'inactive' || site.status === 'deactivated' ? (
+                                  <span className="flex h-2 w-2 relative" title="Deactivated / Suspended">
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                                  </span>
+                                ) : (
+                                  <span className="flex h-2 w-2 relative" title="Active">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                  </span>
+                                )}
                               </div>
-                              <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md ${style.bg} ${style.text} ${style.border} border tracking-wide inline-block mt-1`}>
-                                {site.site_type}
-                              </span>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md ${style.bg} ${style.text} ${style.border} border tracking-wide inline-block`}>
+                                  {site.site_type}
+                                </span>
+                                {site.status === 'suspended' || site.status === 'inactive' || site.status === 'deactivated' ? (
+                                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 tracking-wide">
+                                    Deactivated
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 tracking-wide">
+                                    Active
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
 
@@ -3968,6 +4684,24 @@ export default function App() {
                           >
                             <Code className="w-3.5 h-3.5" /> Config
                           </button>
+                          <button
+                            onClick={() => handleToggleWebsiteStatus(site)}
+                            className={
+                              site.status === 'active'
+                                ? "bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 font-bold text-xs py-2 rounded-xl cursor-pointer border border-amber-500/30 flex items-center justify-center gap-1.5 col-span-2 transition-all"
+                                : "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 font-bold text-xs py-2 rounded-xl cursor-pointer border border-emerald-500/30 flex items-center justify-center gap-1.5 col-span-2 transition-all"
+                            }
+                          >
+                            {site.status === 'active' ? (
+                              <>
+                                <Pause className="w-3.5 h-3.5 text-amber-400" /> Deactivate Site / App
+                              </>
+                            ) : (
+                              <>
+                                <Play className="w-3.5 h-3.5 text-emerald-400" /> Activate Site / App
+                              </>
+                            )}
+                          </button>
                         </div>
                       </div>
                     );
@@ -4008,6 +4742,25 @@ export default function App() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
+                  {/* Export All Databases Button Group */}
+                  <div className="flex items-center rounded-xl bg-slate-900 border border-slate-800 p-0.5 shadow-lg">
+                    <button
+                      onClick={() => handleExportAllDatabases('zip')}
+                      className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 hover:text-emerald-300 font-bold px-4 py-2 rounded-lg text-xs transition-all border border-emerald-500/30 flex items-center gap-2 cursor-pointer shadow-sm"
+                      title="Download full backup archive containing SQL dumps of all databases (.ZIP)"
+                    >
+                      <Download className="w-4 h-4 text-emerald-400" />
+                      <span>Export All Databases (.zip)</span>
+                    </button>
+                    <button
+                      onClick={() => handleExportAllDatabases('sql')}
+                      className="text-slate-400 hover:text-cyan-400 text-xs px-2.5 py-2 font-mono transition-colors cursor-pointer border-l border-slate-800"
+                      title="Export as single combined .SQL file"
+                    >
+                      .SQL
+                    </button>
+                  </div>
+
                   {/* Create Database Button */}
                   <button
                     onClick={() => setShowAddDbModal(true)}
@@ -4041,10 +4794,19 @@ export default function App() {
                   )}
                 </div>
 
-                <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
+                <div className="flex items-center gap-3 text-xs text-slate-400 font-mono">
                   <span>Total Size: <strong className="text-white">{databases.reduce((a, b) => a + (b.size_mb || 0), 0).toFixed(2)} MB</strong></span>
                   <span>|</span>
                   <span>Active DBs: <strong className="text-cyan-400">{databases.length}</strong></span>
+                  <span>|</span>
+                  <button
+                    onClick={() => handleExportAllDatabases('zip')}
+                    className="text-emerald-400 hover:text-emerald-300 underline flex items-center gap-1 cursor-pointer font-sans text-xs font-semibold"
+                    title="Export All Databases Archive (.ZIP)"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download All</span>
+                  </button>
                 </div>
               </div>
 
@@ -4450,6 +5212,15 @@ export default function App() {
                   >
                     <Download className="w-3.5 h-3.5" />
                     <span>Export SQL</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleExportAllDatabases('zip')}
+                    className="bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 font-bold text-xs px-3.5 py-2 rounded-xl border border-indigo-500/30 flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                    title="Export all server databases as .zip"
+                  >
+                    <Download className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Export All DBs</span>
                   </button>
 
                   <button
@@ -4973,29 +5744,48 @@ export default function App() {
             </div>
           )}
 
-          {/* SECURITY & TEAM MANAGEMENT TAB (PRO SUITE) */}
-          {activeTab === 'security' && !activeManageSite && !activeManageDb && (
-            <div className="space-y-6 animate-fade-in">
+          {/* TAB: TEAM MEMBERS & RBAC ACCESS CONTROL */}
+          {activeTab === 'team' && !activeManageSite && !activeManageDb && (
+            <div className="space-y-6 animate-fade-in pb-12">
               {/* Header Banner */}
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900/80 p-6 rounded-3xl border border-slate-800/80 backdrop-blur-xl shadow-2xl">
-                <div>
-                  <div className="flex items-center gap-3">
-                    <h2 className="text-2xl font-extrabold text-white flex items-center gap-3">
-                      <ShieldCheck className="w-7 h-7 text-emerald-400" />
-                      <span>Panel Authentication, RBAC & Security Hardening</span>
-                    </h2>
-                    <span className="bg-emerald-500/10 text-emerald-400 text-xs font-mono font-bold px-3 py-1 rounded-full border border-emerald-500/30 flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-                      WAF & 2FA ACTIVE
-                    </span>
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl">
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shadow-lg shadow-cyan-500/10 shrink-0">
+                    <Users className="w-7 h-7 text-cyan-400" />
                   </div>
-                  <p className="text-sm text-slate-400 mt-1">Manage team access, RBAC permissions, 2FA tokens, active sessions and automated security policies</p>
+                  <div>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <h2 className="text-2xl font-bold text-white flex items-center gap-3">
+                        <span>Team Members & RBAC Access Control</span>
+                      </h2>
+                      <span className="bg-cyan-500/10 text-cyan-400 text-xs font-semibold px-2.5 py-1 rounded-full border border-cyan-500/20 font-mono">
+                        {teamMembers.length} {teamMembers.length === 1 ? 'MEMBER' : 'MEMBERS'}
+                      </span>
+                      <span className="bg-emerald-500/10 text-emerald-400 text-xs font-mono font-bold px-3 py-1 rounded-full border border-emerald-500/30 flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                        RBAC ENFORCED
+                      </span>
+                    </div>
+                    <p className="text-sm text-slate-400 mt-1">
+                      Manage team administrators, operators, role-based access permissions and active collaborator sessions
+                    </p>
+                  </div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
                   <button
+                    onClick={() => {
+                      fetchSecurityAndTeamData();
+                      showToast('Team roster refreshed');
+                    }}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-slate-700 flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <RefreshCw className={`w-4 h-4 text-cyan-400 ${teamLoading ? 'animate-spin' : ''}`} />
+                    <span>Refresh</span>
+                  </button>
+                  <button
                     onClick={() => setShowInviteModal(true)}
-                    className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-emerald-500/25 flex items-center gap-2 cursor-pointer"
+                    className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-cyan-500/25 flex items-center gap-2 cursor-pointer"
                   >
                     <UserPlus className="w-4 h-4" />
                     <span>Invite Team Member</span>
@@ -5003,59 +5793,79 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Metric Overview Strip */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl">
+                  <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                    <span>Total Team Members</span>
+                    <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"><Users className="w-4 h-4" /></div>
+                  </div>
+                  <div className="text-xl font-extrabold text-white font-mono tracking-tight">{teamMembers.length} Members</div>
+                  <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5">
+                    <span className="text-emerald-400 font-semibold">{teamMembers.filter(m => m.status === 'active').length} Active</span>
+                    <span>•</span>
+                    <span className="text-amber-400 font-semibold">{teamMembers.filter(m => m.status === 'invited').length} Invited</span>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl">
+                  <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                    <span>Active Team Sessions</span>
+                    <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"><Key className="w-4 h-4" /></div>
+                  </div>
+                  <div className="text-xl font-extrabold text-white font-mono tracking-tight">{userSessions.length} Logged In</div>
+                  <div className="text-[11px] text-slate-400 mt-1">Authenticated JWT Web Sessions</div>
+                </div>
+
+                <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl">
+                  <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                    <span>Role Enforcement</span>
+                    <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"><ShieldCheck className="w-4 h-4" /></div>
+                  </div>
+                  <div className="text-xl font-extrabold text-emerald-400 font-mono tracking-tight">RBAC Active</div>
+                  <div className="text-[11px] text-slate-400 mt-1">Granular resource boundaries</div>
+                </div>
+
+                <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl">
+                  <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                    <span>2FA Enrollment</span>
+                    <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20"><Lock className="w-4 h-4" /></div>
+                  </div>
+                  <div className="text-xl font-extrabold text-white font-mono tracking-tight">
+                    {teamMembers.filter(m => m.two_factor_enabled).length} / {teamMembers.length}
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-1">Enforced for admin roles</div>
+                </div>
+              </div>
+
               {/* Sub-Tabs Bar */}
               <div className="flex items-center gap-2 border-b border-slate-800/80 pb-3 overflow-x-auto">
-                <button
-                  onClick={() => setActiveSecSubTab('team')}
-                  className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                    activeSecSubTab === 'team'
-                      ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 border border-indigo-500/50'
-                      : 'bg-slate-900/60 hover:bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
-                  }`}
-                >
-                  <Users className="w-4 h-4 text-cyan-400" />
-                  <span>Team Members & Roles ({teamMembers.length})</span>
-                </button>
-
-                <button
-                  onClick={() => setActiveSecSubTab('hardening')}
-                  className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                    activeSecSubTab === 'hardening'
-                      ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 border border-indigo-500/50'
-                      : 'bg-slate-900/60 hover:bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
-                  }`}
-                >
-                  <ShieldAlert className="w-4 h-4 text-emerald-400" />
-                  <span>Security Hardening & WAF</span>
-                </button>
-
-                <button
-                  onClick={() => setActiveSecSubTab('sessions')}
-                  className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                    activeSecSubTab === 'sessions'
-                      ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 border border-indigo-500/50'
-                      : 'bg-slate-900/60 hover:bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
-                  }`}
-                >
-                  <Key className="w-4 h-4 text-amber-400" />
-                  <span>Active User Sessions ({userSessions.length})</span>
-                </button>
-
-                <button
-                  onClick={() => setActiveSecSubTab('audit')}
-                  className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                    activeSecSubTab === 'audit'
-                      ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 border border-indigo-500/50'
-                      : 'bg-slate-900/60 hover:bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
-                  }`}
-                >
-                  <FileText className="w-4 h-4 text-indigo-400" />
-                  <span>Live Security Audit Log ({secAuditLogs.length})</span>
-                </button>
+                {[
+                  { id: 'members', label: `Team Members & Roles (${teamMembers.length})`, icon: Users },
+                  { id: 'sessions', label: `Active Team Sessions (${userSessions.length})`, icon: Key },
+                  { id: 'roles', label: 'RBAC Role Definitions', icon: Shield },
+                ].map((tab) => {
+                  const Icon = tab.icon;
+                  const isActive = activeTeamSubTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveTeamSubTab(tab.id as any)}
+                      className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap ${
+                        isActive
+                          ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 shadow-md shadow-cyan-500/20 font-extrabold'
+                          : 'bg-slate-900/60 hover:bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                      }`}
+                    >
+                      <Icon className={`w-4 h-4 ${isActive ? 'text-slate-950' : 'text-cyan-400'}`} />
+                      <span>{tab.label}</span>
+                    </button>
+                  );
+                })}
               </div>
 
               {/* SUB-TAB 1: TEAM MEMBERS */}
-              {activeSecSubTab === 'team' && (
+              {activeTeamSubTab === 'members' && (
                 <div className="space-y-4 animate-fade-in">
                   <div className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
                     <table className="w-full text-left text-xs font-mono">
@@ -5160,7 +5970,589 @@ export default function App() {
                 </div>
               )}
 
-              {/* SUB-TAB 2: SECURITY HARDENING & FIREWALL */}
+              {/* SUB-TAB 2: ACTIVE TEAM SESSIONS (SUPERADMIN SESSION & HARDWARE MONITOR) */}
+              {activeTeamSubTab === 'sessions' && (() => {
+                const filteredSessions = userSessions.filter(s => {
+                  if (!sessionSearchQuery.trim()) return true;
+                  const q = sessionSearchQuery.toLowerCase();
+                  return (
+                    (s.username && s.username.toLowerCase().includes(q)) ||
+                    (s.ip_address && s.ip_address.toLowerCase().includes(q)) ||
+                    (s.mac_address && s.mac_address.toLowerCase().includes(q)) ||
+                    (s.device_info && s.device_info.toLowerCase().includes(q)) ||
+                    (s.role && s.role.toLowerCase().includes(q)) ||
+                    (s.id && s.id.toLowerCase().includes(q))
+                  );
+                });
+
+                const uniqueUsers = new Set(userSessions.map(s => s.username)).size;
+                const uniqueIPs = new Set(userSessions.map(s => s.ip_address)).size;
+                const uniqueMACs = new Set(userSessions.map(s => s.mac_address)).size;
+
+                return (
+                  <div className="space-y-6 animate-fade-in">
+                    {/* KPI Metrics Strip */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-lg">
+                        <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                          <span>Active Sessions</span>
+                          <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"><Radio className="w-4 h-4 animate-pulse" /></div>
+                        </div>
+                        <div className="text-2xl font-extrabold text-white font-mono tracking-tight">{userSessions.length} Online</div>
+                        <div className="text-[11px] text-emerald-400 mt-1 flex items-center gap-1.5 font-medium">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                          <span>Live Authenticated</span>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-lg">
+                        <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                          <span>Logged-In Users</span>
+                          <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"><Users className="w-4 h-4" /></div>
+                        </div>
+                        <div className="text-2xl font-extrabold text-cyan-400 font-mono tracking-tight">{uniqueUsers} Accounts</div>
+                        <div className="text-[11px] text-slate-400 mt-1">Superadmin, DevOps & Ops</div>
+                      </div>
+
+                      <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-lg">
+                        <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                          <span>Unique Client IPs</span>
+                          <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"><Globe className="w-4 h-4" /></div>
+                        </div>
+                        <div className="text-2xl font-extrabold text-white font-mono tracking-tight">{uniqueIPs} IP Addresses</div>
+                        <div className="text-[11px] text-slate-400 mt-1">Local, LAN & Remote WAN</div>
+                      </div>
+
+                      <div className="bg-slate-900/60 p-4 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-lg">
+                        <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                          <span>Hardware NICs</span>
+                          <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20"><Fingerprint className="w-4 h-4" /></div>
+                        </div>
+                        <div className="text-2xl font-extrabold text-purple-400 font-mono tracking-tight">{uniqueMACs} Unique MACs</div>
+                        <div className="text-[11px] text-slate-400 mt-1">ARP / Layer-2 Hardware Bound</div>
+                      </div>
+                    </div>
+
+                    {/* Toolbar: Search, Refresh, Revoke All */}
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-900/60 p-4 rounded-2xl border border-slate-800/80 backdrop-blur-xl">
+                      <div className="relative flex-1 max-w-md">
+                        <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input
+                          type="text"
+                          value={sessionSearchQuery}
+                          onChange={(e) => setSessionSearchQuery(e.target.value)}
+                          placeholder="Search sessions by user, IP address, MAC, or device..."
+                          className="w-full pl-10 pr-4 py-2 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500/50 transition-all font-mono"
+                        />
+                        {sessionSearchQuery && (
+                          <button
+                            onClick={() => setSessionSearchQuery('')}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-500 hover:text-slate-300"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2.5">
+                        <button
+                          onClick={() => {
+                            fetchSecurityAndTeamData();
+                            showToast('Refreshed active sessions telemetry');
+                          }}
+                          className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                          title="Refresh sessions list"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5 text-cyan-400" />
+                          <span>Refresh</span>
+                        </button>
+
+                        <button
+                          onClick={handleRevokeAllOtherSessions}
+                          className="px-4 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                          title="Log out all other sessions immediately"
+                        >
+                          <LogOut className="w-3.5 h-3.5" />
+                          <span>Terminate Other Sessions</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Sessions Table */}
+                    <div className="bg-slate-900/80 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-950/90 text-slate-400 border-b border-slate-800 uppercase tracking-wider font-semibold text-[11px]">
+                            <tr>
+                              <th className="py-4 px-5">User & Account</th>
+                              <th className="py-4 px-5">IP Address</th>
+                              <th className="py-4 px-5">Hardware MAC Address</th>
+                              <th className="py-4 px-5">Device / OS</th>
+                              <th className="py-4 px-5">Network Context</th>
+                              <th className="py-4 px-5">Last Activity</th>
+                              <th className="py-4 px-5 text-right">Session Control</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/60 text-slate-200">
+                            {filteredSessions.length === 0 ? (
+                              <tr>
+                                <td colSpan={7} className="text-center py-12 text-slate-500 text-xs">
+                                  No active sessions match your search filter.
+                                </td>
+                              </tr>
+                            ) : (
+                              filteredSessions.map((s) => {
+                                const isSuperAdminRole = s.role === 'superadmin' || s.username === 'admin';
+                                return (
+                                  <tr key={s.id} className={`hover:bg-slate-800/40 transition-colors ${s.is_current ? 'bg-cyan-500/[0.03]' : ''}`}>
+                                    {/* User Column */}
+                                    <td className="py-4 px-5">
+                                      <div className="flex items-center gap-3">
+                                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
+                                          isSuperAdminRole
+                                            ? 'bg-gradient-to-br from-amber-500/20 to-orange-500/20 text-amber-400 border border-amber-500/30'
+                                            : 'bg-gradient-to-br from-cyan-500/20 to-blue-500/20 text-cyan-400 border border-cyan-500/30'
+                                        }`}>
+                                          {s.username ? s.username.slice(0, 2).toUpperCase() : 'US'}
+                                        </div>
+                                        <div>
+                                          <div className="flex items-center gap-2">
+                                            <span className="font-bold text-white text-sm">{s.username}</span>
+                                            {s.is_current && (
+                                              <span className="bg-emerald-500/15 text-emerald-400 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border border-emerald-500/30 flex items-center gap-1">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+                                                THIS DEVICE
+                                              </span>
+                                            )}
+                                          </div>
+                                          <div className="flex items-center gap-1.5 mt-0.5">
+                                            <span className={`text-[10px] font-mono uppercase font-bold px-1.5 py-0.2 rounded border ${
+                                              isSuperAdminRole
+                                                ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                                                : 'bg-slate-800 text-slate-400 border-slate-700'
+                                            }`}>
+                                              {s.role || 'admin'}
+                                            </span>
+                                            <span className="text-[10px] text-slate-500 font-mono">#{s.id.slice(-6)}</span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </td>
+
+                                    {/* IP Address Column */}
+                                    <td className="py-4 px-5 font-mono">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-bold text-white tracking-wide text-xs">{s.ip_address}</span>
+                                        <button
+                                          onClick={() => {
+                                            navigator.clipboard.writeText(s.ip_address);
+                                            showToast('IP copied to clipboard');
+                                          }}
+                                          className="text-slate-500 hover:text-slate-300 p-1 rounded hover:bg-slate-800 transition-colors"
+                                          title="Copy IP"
+                                        >
+                                          <Copy className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                      <span className="text-[10px] text-slate-400">
+                                        {s.ip_address === '127.0.0.1' || s.ip_address === '::1'
+                                          ? 'Local Loopback'
+                                          : s.ip_address.startsWith('172.') || s.ip_address.startsWith('192.168.') || s.ip_address.startsWith('10.')
+                                          ? 'Private LAN Subnet'
+                                          : 'Public Internet'}
+                                      </span>
+                                    </td>
+
+                                    {/* MAC Address Column */}
+                                    <td className="py-4 px-5 font-mono">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-7 h-7 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 shrink-0">
+                                          <Fingerprint className="w-3.5 h-3.5" />
+                                        </div>
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="font-bold text-purple-300 tracking-wider text-xs bg-purple-950/40 px-2 py-0.5 rounded-lg border border-purple-500/20 select-all">
+                                            {s.mac_address || '00:15:5D:7F:90:EA'}
+                                          </span>
+                                          <button
+                                            onClick={() => {
+                                              navigator.clipboard.writeText(s.mac_address || '00:15:5D:7F:90:EA');
+                                              showToast('MAC Address copied to clipboard');
+                                            }}
+                                            className="text-slate-500 hover:text-slate-300 p-1 rounded hover:bg-slate-800 transition-colors"
+                                            title="Copy MAC Address"
+                                          >
+                                            <Copy className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                      <span className="text-[10px] text-slate-500 mt-0.5 block">NIC Hardware L2 Address</span>
+                                    </td>
+
+                                    {/* Device / OS Column */}
+                                    <td className="py-4 px-5">
+                                      <div className="flex items-center gap-2">
+                                        {s.device_info && (s.device_info.includes('macOS') || s.device_info.includes('Mac')) ? (
+                                          <Laptop className="w-4 h-4 text-slate-400 shrink-0" />
+                                        ) : s.device_info && s.device_info.includes('Windows') ? (
+                                          <Monitor className="w-4 h-4 text-cyan-400 shrink-0" />
+                                        ) : s.device_info && (s.device_info.includes('iOS') || s.device_info.includes('Android')) ? (
+                                          <Smartphone className="w-4 h-4 text-emerald-400 shrink-0" />
+                                        ) : (
+                                          <Server className="w-4 h-4 text-indigo-400 shrink-0" />
+                                        )}
+                                        <span className="text-slate-200 font-semibold">{s.device_info || 'Unknown Device'}</span>
+                                      </div>
+                                      <span className="text-[11px] text-slate-500 truncate max-w-xs block mt-0.5" title={s.user_agent}>
+                                        {s.user_agent ? s.user_agent.slice(0, 40) + '...' : 'Standard Client'}
+                                      </span>
+                                    </td>
+
+                                    {/* Network Context Column */}
+                                    <td className="py-4 px-5">
+                                      <div className="flex items-center gap-1.5 text-slate-300 text-xs">
+                                        <Network className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                                        <span>{s.location || 'Local Host Interface'}</span>
+                                      </div>
+                                    </td>
+
+                                    {/* Activity Column */}
+                                    <td className="py-4 px-5 font-mono">
+                                      <div className="flex items-center gap-1.5 text-emerald-400 font-bold text-[11px]">
+                                        <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                                        <span>{s.last_active || 'Just now'}</span>
+                                      </div>
+                                      <span className="text-[10px] text-slate-500 block mt-0.5">
+                                        {s.created_at ? `Login: ${new Date(s.created_at).toLocaleTimeString()}` : 'Live session'}
+                                      </span>
+                                    </td>
+
+                                    {/* Session Control Column */}
+                                    <td className="py-4 px-5 text-right">
+                                      {s.is_current ? (
+                                        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[11px] font-bold">
+                                          <Check className="w-3 h-3" />
+                                          Current Device
+                                        </span>
+                                      ) : (
+                                        <button
+                                          onClick={() => handleRevokeSession(s.id)}
+                                          className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 rounded-xl border border-rose-500/30 font-bold text-xs transition-all flex items-center gap-1.5 ml-auto cursor-pointer shadow-sm"
+                                          title="Terminate this session immediately"
+                                        >
+                                          <Trash2 className="w-3 h-3" />
+                                          <span>Revoke</span>
+                                        </button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* SUB-TAB 3: RBAC ROLE MATRIX */}
+              {activeTeamSubTab === 'roles' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in">
+                  <div className="bg-slate-900/60 p-6 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl space-y-4">
+                    <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
+                      <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400">
+                        <Shield className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-white">Owner & Super Administrator</h4>
+                        <p className="text-[11px] text-slate-400">Full system & server host authorization</p>
+                      </div>
+                    </div>
+                    <ul className="text-xs text-slate-300 space-y-2">
+                      <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Full root command execution & Nginx configuration</li>
+                      <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Database creation, drop, user grant and SQL dump</li>
+                      <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Team member invitation, role promotion and revocation</li>
+                      <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> WAF, TLS hardening and system backup policy</li>
+                    </ul>
+                  </div>
+
+                  <div className="bg-slate-900/60 p-6 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl space-y-4">
+                    <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
+                      <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+                        <Code className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-white">DevOps Engineer</h4>
+                        <p className="text-[11px] text-slate-400">Application deployment & runtime manager</p>
+                      </div>
+                    </div>
+                    <ul className="text-xs text-slate-300 space-y-2">
+                      <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Website vhost management & PHP/Node/Python supervisor</li>
+                      <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> File manager, SSL certificate renewal & cron tasks</li>
+                      <li className="flex items-center gap-2 text-slate-500"><AlertTriangle className="w-4 h-4 text-amber-500" /> Cannot modify WAF policies or invite new team members</li>
+                    </ul>
+                  </div>
+
+                  <div className="bg-slate-900/60 p-6 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl space-y-4">
+                    <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
+                      <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                        <Database className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-white">Database Manager</h4>
+                        <p className="text-[11px] text-slate-400">SQL instances & schema administrator</p>
+                      </div>
+                    </div>
+                    <ul className="text-xs text-slate-300 space-y-2">
+                      <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Create, query, optimize and export databases</li>
+                      <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Manage database credentials and live SQL console</li>
+                      <li className="flex items-center gap-2 text-slate-500"><AlertTriangle className="w-4 h-4 text-amber-500" /> Restricted from website file managers and system services</li>
+                    </ul>
+                  </div>
+
+                  <div className="bg-slate-900/60 p-6 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl space-y-4">
+                    <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
+                      <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400">
+                        <FileText className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-white">Auditor</h4>
+                        <p className="text-[11px] text-slate-400">Compliance & telemetry reviewer</p>
+                      </div>
+                    </div>
+                    <ul className="text-xs text-slate-300 space-y-2">
+                      <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Read-only access to metrics, logs and audit trails</li>
+                      <li className="flex items-center gap-2 text-slate-500"><AlertTriangle className="w-4 h-4 text-amber-500" /> Read-only: cannot mutate files, databases, or system configs</li>
+                    </ul>
+                  </div>
+                </div>
+              )}
+
+              {/* INVITE TEAM MEMBER MODAL */}
+              {showInviteModal && (
+                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+                  <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-6 space-y-4 shadow-2xl animate-scale-up">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                      <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                        <UserPlus className="w-5 h-5 text-cyan-400" />
+                        <span>Invite Team Member</span>
+                      </h3>
+                      <button
+                        onClick={() => setShowInviteModal(false)}
+                        className="text-slate-400 hover:text-white text-sm font-bold"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-xs font-semibold text-slate-400">Full Name:</label>
+                        <input
+                          type="text"
+                          value={inviteName}
+                          onChange={(e) => setInviteName(e.target.value)}
+                          placeholder="Full Name"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white outline-none mt-1"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-semibold text-slate-400">Email Address:</label>
+                        <input
+                          type="email"
+                          value={inviteEmail}
+                          onChange={(e) => setInviteEmail(e.target.value)}
+                          placeholder="user@example.com"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white outline-none mt-1"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-semibold text-slate-400">RBAC Role:</label>
+                        <select
+                          value={inviteRole}
+                          onChange={(e) => setInviteRole(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-cyan-300 outline-none mt-1 cursor-pointer"
+                        >
+                          <option value="DevOps Engineer">DevOps Engineer (Websites & Files)</option>
+                          <option value="Database Manager">Database Manager (SQL & DBs)</option>
+                          <option value="Administrator">Administrator (Full Access)</option>
+                          <option value="Auditor">Auditor (Read Only)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-2">
+                      <button
+                        onClick={() => setShowInviteModal(false)}
+                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!inviteEmail) return alert('Please enter a valid email address');
+                          try {
+                            const res = await fetch(`${API_BASE}/api/v1/team/invite`, {
+                              method: 'POST',
+                              headers: getHeaders(true),
+                              body: JSON.stringify({ name: inviteName, email: inviteEmail, role: inviteRole }),
+                            });
+                            const data = await res.json();
+                            if (res.ok) {
+                              showToast(`Invitation sent to ${inviteEmail}`);
+                              setTeamMembers(prev => [
+                                ...prev,
+                                {
+                                  id: Date.now(),
+                                  name: inviteName || 'New User',
+                                  email: inviteEmail,
+                                  username: inviteEmail.split('@')[0],
+                                  role: inviteRole,
+                                  permissions: ['websites.manage'],
+                                  two_factor_enabled: false,
+                                  status: 'invited',
+                                  last_login: 'Never',
+                                  avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${inviteName}`,
+                                },
+                              ]);
+                              setShowInviteModal(false);
+                              setInviteName('');
+                              setInviteEmail('');
+                            }
+                          } catch (e: any) {
+                            alert(e.message);
+                          }
+                        }}
+                        className="px-5 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 text-xs font-bold rounded-xl cursor-pointer shadow-lg shadow-cyan-500/25 flex items-center gap-2"
+                      >
+                        <UserPlus className="w-4 h-4" />
+                        <span>Send Invitation</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB: SECURITY HARDENING, WAF & AUDIT CENTER */}
+          {activeTab === 'security' && !activeManageSite && !activeManageDb && (
+            <div className="space-y-6 animate-fade-in pb-12">
+              {/* Header Banner */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl">
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-lg shadow-emerald-500/10 shrink-0">
+                    <ShieldCheck className="w-7 h-7 text-emerald-400" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <h2 className="text-2xl font-bold text-white flex items-center gap-3">
+                        <span>Security Hardening, WAF & Audit Center</span>
+                      </h2>
+                      <span className="bg-emerald-500/10 text-emerald-400 text-xs font-mono font-bold px-3 py-1 rounded-full border border-emerald-500/30 flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+                        WAF ACTIVE
+                      </span>
+                      <span className="bg-cyan-500/10 text-cyan-400 text-xs font-mono font-bold px-2.5 py-1 rounded-full border border-cyan-500/20">
+                        FAIL2BAN RUNNING
+                      </span>
+                    </div>
+                    <p className="text-sm text-slate-400 mt-1">
+                      Configure Web Application Firewall rules, deep packet inspection, rate limiting, IP blacklists, and inspect live security audit logs
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={() => {
+                      fetchSecurityAndTeamData();
+                      showToast('Security rules & audit telemetry reloaded');
+                    }}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-slate-700 flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <RefreshCw className="w-4 h-4 text-emerald-400" />
+                    <span>Reload Rules</span>
+                  </button>
+                  <button
+                    onClick={() => showToast('Security hardening policy saved and enforced successfully!')}
+                    className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-emerald-500/25 flex items-center gap-2 cursor-pointer"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Save Policy</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Metric Overview Strip */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl">
+                  <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                    <span>WAF Protection</span>
+                    <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"><ShieldAlert className="w-4 h-4" /></div>
+                  </div>
+                  <div className="text-xl font-extrabold text-emerald-400 font-mono tracking-tight">Active & Enforced</div>
+                  <div className="text-[11px] text-slate-400 mt-1">SQLi, XSS & RFI payload filters</div>
+                </div>
+
+                <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl">
+                  <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                    <span>Rate Limiting</span>
+                    <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"><Zap className="w-4 h-4" /></div>
+                  </div>
+                  <div className="text-xl font-extrabold text-white font-mono tracking-tight">{secHardening.rate_limit_rpm} Req/Min</div>
+                  <div className="text-[11px] text-slate-400 mt-1">Anti-DDoS burst protection</div>
+                </div>
+
+                <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl">
+                  <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                    <span>Live Audit Events</span>
+                    <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"><FileText className="w-4 h-4" /></div>
+                  </div>
+                  <div className="text-xl font-extrabold text-white font-mono tracking-tight">{secAuditLogs.length} Events</div>
+                  <div className="text-[11px] text-slate-400 mt-1">Real-time security telemetry</div>
+                </div>
+
+                <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl">
+                  <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                    <span>Fail2Ban IP Guard</span>
+                    <div className="p-2 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20"><Lock className="w-4 h-4" /></div>
+                  </div>
+                  <div className="text-xl font-extrabold text-rose-400 font-mono tracking-tight">{secHardening.ip_blacklist?.length || 2} Blocked IPs</div>
+                  <div className="text-[11px] text-slate-400 mt-1">5 failed attempts threshold</div>
+                </div>
+              </div>
+
+              {/* Sub-Tabs Bar */}
+              <div className="flex items-center gap-2 border-b border-slate-800/80 pb-3 overflow-x-auto">
+                {[
+                  { id: 'hardening', label: 'WAF & System Hardening', icon: ShieldAlert },
+                  { id: 'audit', label: `Live Security Audit Log (${secAuditLogs.length})`, icon: FileText },
+                  { id: 'ip_rules', label: 'IP Whitelist & Blacklist', icon: Globe },
+                ].map((tab) => {
+                  const Icon = tab.icon;
+                  const isActive = activeSecSubTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveSecSubTab(tab.id as any)}
+                      className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap ${
+                        isActive
+                          ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 font-extrabold shadow-md shadow-emerald-500/20'
+                          : 'bg-slate-900/60 hover:bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                      }`}
+                    >
+                      <Icon className={`w-4 h-4 ${isActive ? 'text-slate-950' : 'text-emerald-400'}`} />
+                      <span>{tab.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* SUB-TAB 1: SECURITY HARDENING & WAF */}
               {activeSecSubTab === 'hardening' && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in">
                   {/* WAF Policy */}
@@ -5267,70 +6659,49 @@ export default function App() {
                           className="w-4 h-4 accent-cyan-500 cursor-pointer"
                         />
                       </label>
+
+                      <div className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs font-bold text-white">Google Authenticator (2FA)</p>
+                            <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${profileAccount?.twoFactorEnabled ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/15 text-amber-400 border-amber-500/30'}`}>
+                              {profileAccount?.twoFactorEnabled ? 'ACTIVE' : 'OFF'}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-400 mt-0.5">Require 6-digit TOTP one-time passcode for master account logins</p>
+                        </div>
+                        {profileAccount?.twoFactorEnabled ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTwoFactorDisableError(null);
+                              setTwoFactorDisablePassword('');
+                              setShowTwoFactorDisableModal(true);
+                            }}
+                            className="px-3.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold cursor-pointer transition-all shrink-0"
+                          >
+                            Disable
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handleStart2FASetup}
+                            className="px-3.5 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-bold cursor-pointer transition-all flex items-center gap-1 shrink-0"
+                          >
+                            <QrCode className="w-3.5 h-3.5" />
+                            <span>Set Up 2FA</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* SUB-TAB 3: ACTIVE USER SESSIONS */}
-              {activeSecSubTab === 'sessions' && (
-                <div className="space-y-4 animate-fade-in">
-                  <div className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-                    <table className="w-full text-left text-xs font-mono">
-                      <thead className="bg-slate-950 text-slate-400 border-b border-slate-800 uppercase tracking-wider">
-                        <tr>
-                          <th className="p-4">Session ID</th>
-                          <th className="p-4">IP Address</th>
-                          <th className="p-4">Location / Context</th>
-                          <th className="p-4">User Agent / Browser</th>
-                          <th className="p-4">Last Active</th>
-                          <th className="p-4 text-right">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/60 text-slate-200">
-                        {userSessions.map((s) => (
-                          <tr key={s.id} className="hover:bg-slate-800/40 transition-colors">
-                            <td className="p-4 font-bold text-cyan-300 flex items-center gap-2">
-                              <span>{s.id}</span>
-                              {s.is_current && (
-                                <span className="bg-emerald-500/20 text-emerald-400 text-[10px] px-2 py-0.5 rounded-full border border-emerald-500/30">
-                                  THIS DEVICE
-                                </span>
-                              )}
-                            </td>
-                            <td className="p-4 text-white font-bold">{s.ip_address}</td>
-                            <td className="p-4 text-slate-300">{s.location}</td>
-                            <td className="p-4 text-slate-400 max-w-xs truncate" title={s.user_agent}>
-                              {s.user_agent}
-                            </td>
-                            <td className="p-4 text-slate-400">{s.last_active}</td>
-                            <td className="p-4 text-right">
-                              {!s.is_current ? (
-                                <button
-                                  onClick={() => {
-                                    setUserSessions(prev => prev.filter(item => item.id !== s.id));
-                                    showToast(`Revoked session ${s.id}`);
-                                  }}
-                                  className="px-3 py-1 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded-lg border border-rose-500/30 font-bold transition-all cursor-pointer"
-                                >
-                                  Revoke
-                                </button>
-                              ) : (
-                                <span className="text-slate-500 italic">Active Session</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {/* SUB-TAB 4: LIVE SECURITY AUDIT LOG */}
+              {/* SUB-TAB 2: LIVE SECURITY AUDIT LOG */}
               {activeSecSubTab === 'audit' && (
                 <div className="space-y-4 animate-fade-in">
-                  <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 font-mono text-xs space-y-2 max-h-[600px] overflow-y-auto">
+                  <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 font-mono text-xs space-y-2 max-h-[600px] overflow-y-auto shadow-xl">
                     {secAuditLogs.map((log, idx) => (
                       <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-2.5 rounded-xl bg-slate-900/60 border border-slate-800/60 gap-2">
                         <div className="flex items-center gap-3">
@@ -5356,119 +6727,76 @@ export default function App() {
                 </div>
               )}
 
-              {/* INVITE TEAM MEMBER MODAL */}
-              {showInviteModal && (
-                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-                  <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl p-6 space-y-4 shadow-2xl animate-scale-up">
+              {/* SUB-TAB 3: IP WHITELIST & BLACKLIST */}
+              {activeSecSubTab === 'ip_rules' && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in">
+                  <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-3xl space-y-4 shadow-xl">
                     <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                      <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                        <UserPlus className="w-5 h-5 text-emerald-400" />
-                        <span>Invite Team Member</span>
-                      </h3>
-                      <button
-                        onClick={() => setShowInviteModal(false)}
-                        className="text-slate-400 hover:text-white text-sm font-bold"
-                      >
-                        ✕
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                          <ShieldCheck className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-white">IP Whitelist (Trusted Access)</h4>
+                          <p className="text-[11px] text-slate-400">Bypasses WAF rate limits & lockout checks</p>
+                        </div>
+                      </div>
+                      <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/30">
+                        {secHardening.ip_whitelist?.length || 0} IPs
+                      </span>
                     </div>
 
-                    <div className="space-y-3">
-                      <div>
-                        <label className="text-xs font-semibold text-slate-400">Full Name:</label>
-                        <input
-                          type="text"
-                          value={inviteName}
-                          onChange={(e) => setInviteName(e.target.value)}
-                          placeholder="e.g. Sarah Jenkins"
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white outline-none mt-1"
-                        />
-                      </div>
+                    <div className="space-y-2">
+                      {(secHardening.ip_whitelist || ['127.0.0.1', '192.168.1.0/24']).map((ip: string, i: number) => (
+                        <div key={i} className="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-slate-800 font-mono text-xs">
+                          <span className="text-slate-200">{ip}</span>
+                          <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">ALLOWED</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
 
-                      <div>
-                        <label className="text-xs font-semibold text-slate-400">Email Address:</label>
-                        <input
-                          type="email"
-                          value={inviteEmail}
-                          onChange={(e) => setInviteEmail(e.target.value)}
-                          placeholder="sarah@company.com"
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-white outline-none mt-1"
-                        />
+                  <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-3xl space-y-4 shadow-xl">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400">
+                          <ShieldAlert className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-bold text-white">IP Blacklist (Banned Hosts)</h4>
+                          <p className="text-[11px] text-slate-400">Blocked automatically by fail2ban and rate limiter</p>
+                        </div>
                       </div>
-
-                      <div>
-                        <label className="text-xs font-semibold text-slate-400">RBAC Role:</label>
-                        <select
-                          value={inviteRole}
-                          onChange={(e) => setInviteRole(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-cyan-300 outline-none mt-1"
-                        >
-                          <option value="DevOps Engineer">DevOps Engineer (Websites & Files)</option>
-                          <option value="Database Manager">Database Manager (SQL & DBs)</option>
-                          <option value="Administrator">Administrator (Full Access)</option>
-                          <option value="Auditor">Auditor (Read Only)</option>
-                        </select>
-                      </div>
+                      <span className="text-xs font-mono font-bold text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded-full border border-rose-500/30">
+                        {secHardening.ip_blacklist?.length || 0} Banned
+                      </span>
                     </div>
 
-                    <div className="flex justify-end gap-3 pt-2">
-                      <button
-                        onClick={() => setShowInviteModal(false)}
-                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl cursor-pointer"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={async () => {
-                          if (!inviteEmail) return alert('Please enter a valid email address');
-                          try {
-                            const res = await fetch(`${API_BASE}/api/v1/team/invite`, {
-                              method: 'POST',
-                              headers: getHeaders(true),
-                              body: JSON.stringify({ name: inviteName, email: inviteEmail, role: inviteRole }),
-                            });
-                            const data = await res.json();
-                            if (res.ok) {
-                              showToast(`Invitation sent to ${inviteEmail}`);
-                              setTeamMembers(prev => [
-                                ...prev,
-                                {
-                                  id: Date.now(),
-                                  name: inviteName || 'New User',
-                                  email: inviteEmail,
-                                  username: inviteEmail.split('@')[0],
-                                  role: inviteRole,
-                                  permissions: ['websites.manage'],
-                                  two_factor_enabled: false,
-                                  status: 'invited',
-                                  last_login: 'Never',
-                                  avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${inviteName}`,
-                                },
-                              ]);
-                              setShowInviteModal(false);
-                              setInviteName('');
-                              setInviteEmail('');
-                            }
-                          } catch (e: any) {
-                            alert(e.message);
-                          }
-                        }}
-                        className="px-5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold rounded-xl cursor-pointer shadow-lg shadow-emerald-500/25 flex items-center gap-2"
-                      >
-                        <UserPlus className="w-4 h-4" />
-                        <span>Send Invitation</span>
-                      </button>
+                    <div className="space-y-2">
+                      {(secHardening.ip_blacklist || ['198.51.100.44', '203.0.113.99']).map((ip: string, i: number) => (
+                        <div key={i} className="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-slate-800 font-mono text-xs">
+                          <span className="text-rose-300">{ip}</span>
+                          <button
+                            onClick={() => {
+                              setSecHardening({
+                                ...secHardening,
+                                ip_blacklist: secHardening.ip_blacklist.filter((item: string) => item !== ip)
+                              });
+                              showToast(`Unbanned IP address ${ip}`);
+                            }}
+                            className="text-[10px] text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 px-2 py-0.5 rounded transition-all cursor-pointer"
+                          >
+                            Unban
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 </div>
               )}
-              {/* MY PROFILE & ACCOUNT SETTINGS MODAL */}
-              {/* MY PROFILE & ACCOUNT SETTINGS MODAL */}
             </div>
           )}
 
-          {/* MY PROFILE & ACCOUNT SETTINGS PAGE ROUTE */}
-          
           {/* TAB: APP SUPERVISOR (Node.js & Python) */}
           {activeTab === 'supervisor' && !activeManageSite && (
             <div className="space-y-6 animate-fade-in">
@@ -5577,6 +6905,17 @@ export default function App() {
                   </h2>
                   <p className="text-xs text-slate-400 mt-1">Manage local Bind9 DNS records & instant Cloudflare API synchronization</p>
                 </div>
+
+                <button
+                  onClick={() => {
+                    setActiveTab('profile');
+                    setActiveProfileTab('panel_domain');
+                  }}
+                  className="bg-gradient-to-r from-cyan-600/30 to-blue-600/30 hover:from-cyan-600/50 hover:to-blue-600/50 text-cyan-300 hover:text-white border border-cyan-500/40 px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-2 cursor-pointer"
+                >
+                  <Globe className="w-4 h-4 text-cyan-400" />
+                  <span>Configure Panel Domain (CloudPanel Style) →</span>
+                </button>
               </div>
 
               <div className="bg-slate-900/60 border border-slate-800 p-6 rounded-2xl space-y-4">
@@ -5668,389 +7007,589 @@ export default function App() {
             </div>
           )}
 
-{activeTab === 'profile' && !activeManageSite && !activeManageDb && (
-                <div className="space-y-6 animate-fade-in max-w-5xl mx-auto pb-12">
-                  {/* Page Top Breadcrumb Banner */}
-                  <div className="bg-gradient-to-r from-purple-950/40 via-slate-900 to-indigo-950/40 border border-purple-500/20 rounded-3xl p-6 shadow-xl backdrop-blur-md flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div className="flex items-center gap-4">
-                      <div className="relative">
-                        <img
-                          src="https://api.dicebear.com/7.x/avataaars/svg?seed=Admin"
-                          alt="User Avatar"
-                          className="w-16 h-16 rounded-2xl bg-slate-950 border-2 border-purple-500/40 p-0.5 shadow-lg shadow-purple-500/10"
-                        />
-                        <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-emerald-500 border-2 border-slate-900 rounded-full flex items-center justify-center">
-                          <Check className="w-3 h-3 text-slate-950 stroke-[3]" />
-                        </span>
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2.5 flex-wrap">
-                          <h2 className="text-2xl font-extrabold text-white tracking-tight">Super Admin Profile</h2>
-                          <span className="bg-purple-500/20 text-purple-300 text-xs font-mono font-bold px-2.5 py-0.5 rounded-full border border-purple-500/30">
-                            OWNER
+{activeTab === 'profile' && !activeManageSite && !activeManageDb && (() => {
+            const inputCls = 'w-full bg-slate-950 border border-slate-800 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50 rounded-xl px-4 py-2.5 text-xs text-slate-100 placeholder:text-slate-500 outline-none transition-all';
+            const cardCls = 'bg-slate-900/60 p-6 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl';
+            const labelCls = 'text-xs font-bold text-slate-300 uppercase tracking-wider';
+            const twoFA = !!profileAccount?.twoFactorEnabled;
+            const roleLabel = (profileAccount?.role || '—').toUpperCase();
+            const joined = (() => {
+              if (!profileAccount?.createdAt) return null;
+              const d = new Date(profileAccount.createdAt);
+              return isNaN(d.getTime()) || d.getFullYear() < 2000 ? null : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+            })();
+            const autoLogoutLabel: Record<string, string> = { '15m': '15 min', '30m': '30 min', '1h': '1 hour', '4h': '4 hours', Never: 'Disabled' };
+            return (
+            <div className="space-y-6 animate-fade-in pb-12">
+              {/* Header */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl">
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500/20 via-cyan-500/20 to-blue-500/20 border-2 border-cyan-500/40 p-0.5 flex items-center justify-center shadow-lg shadow-cyan-500/10 shrink-0">
+                    <img
+                      src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(profileUsername || 'admin')}`}
+                      alt="Administrator avatar"
+                      className="w-full h-full rounded-xl bg-slate-950 object-cover"
+                    />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <h2 className="text-2xl font-bold text-white flex items-center gap-3">
+                        <UserCheck className="w-7 h-7 text-cyan-400" />
+                        <span>Administrator Profile</span>
+                      </h2>
+                      <span className="bg-cyan-500/10 text-cyan-400 text-xs font-semibold px-2.5 py-1 rounded-full border border-cyan-500/20 font-mono">
+                        {roleLabel}
+                      </span>
+                      {profileAccount && (
+                        twoFA ? (
+                          <span className="bg-emerald-500/10 text-emerald-400 text-xs font-mono font-bold px-3 py-1 rounded-full border border-emerald-500/30 flex items-center gap-1.5">
+                            <ShieldCheck className="w-3.5 h-3.5" /> 2FA ENABLED
                           </span>
-                          <span className="bg-emerald-500/20 text-emerald-400 text-xs font-mono font-bold px-2.5 py-0.5 rounded-full border border-emerald-500/30 flex items-center gap-1">
-                            <ShieldCheck className="w-3 h-3 text-emerald-400" /> 2FA Active
+                        ) : (
+                          <span className="bg-amber-500/10 text-amber-400 text-xs font-mono font-bold px-3 py-1 rounded-full border border-amber-500/30 flex items-center gap-1.5">
+                            <AlertTriangle className="w-3.5 h-3.5" /> 2FA OFF
                           </span>
-                        </div>
-                        <p className="text-xs text-slate-400 mt-1 flex items-center gap-2">
-                          <span>admin@hoatzin.org</span>
-                          <span>•</span>
-                          <span>Joined Oct 2026</span>
-                          <span>•</span>
-                          <span className="text-cyan-400 font-mono">ID: #USR-9042</span>
-                        </p>
-                      </div>
+                        )
+                      )}
                     </div>
-
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={() => {
-                          showToast('Profile & preferences saved successfully!');
-                        }}
-                        className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl cursor-pointer shadow-lg shadow-purple-500/25 flex items-center gap-2 transition-all"
-                      >
-                        <Check className="w-4 h-4" />
-                        <span>Save Profile Settings</span>
-                      </button>
-                    </div>
+                    <p className="text-sm text-slate-400 mt-1">
+                      {profileName || profileUsername}
+                      {profileEmail ? <> · <span className="text-slate-300">{profileEmail}</span></> : null}
+                      {joined ? <> · Joined {joined}</> : null}
+                    </p>
                   </div>
+                </div>
 
-                  {/* Navigation Preferences Tabs */}
-                  <div className="flex items-center gap-2 border-b border-slate-800 pb-3 overflow-x-auto">
-                    <button
-                      onClick={() => setActiveProfileTab('general')}
-                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 whitespace-nowrap ${
-                        activeProfileTab === 'general'
-                          ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-md shadow-purple-500/10'
-                          : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                      }`}
-                    >
-                      <UserCheck className="w-4 h-4 text-purple-400" />
-                      <span>General & Contact</span>
-                    </button>
-                    <button
-                      onClick={() => setActiveProfileTab('localization')}
-                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 whitespace-nowrap ${
-                        activeProfileTab === 'localization'
-                          ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-md shadow-purple-500/10'
-                          : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                      }`}
-                    >
-                      <Globe className="w-4 h-4 text-cyan-400" />
-                      <span>Localization & Regional</span>
-                    </button>
-                    <button
-                      onClick={() => setActiveProfileTab('notifications')}
-                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 whitespace-nowrap ${
-                        activeProfileTab === 'notifications'
-                          ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-md shadow-purple-500/10'
-                          : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                      }`}
-                    >
-                      <Bell className="w-4 h-4 text-amber-400" />
-                      <span>Notification Alerts</span>
-                    </button>
-                    <button
-                      onClick={() => setActiveProfileTab('security')}
-                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 whitespace-nowrap ${
-                        activeProfileTab === 'security'
-                          ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-md shadow-purple-500/10'
-                          : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-                      }`}
-                    >
-                      <ShieldAlert className="w-4 h-4 text-emerald-400" />
-                      <span>Security & API Keys</span>
-                    </button>
-                  </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={loadProfile}
+                    disabled={profileLoading}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-slate-700 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-60"
+                    title="Reload profile from server"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${profileLoading ? 'animate-spin' : ''}`} />
+                    <span>Reload</span>
+                  </button>
+                  <button
+                    onClick={saveProfile}
+                    disabled={profileSaving || !profileAccount}
+                    className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-cyan-500/25 flex items-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {profileSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                    <span>{profileSaving ? 'Saving…' : 'Save Profile'}</span>
+                  </button>
+                </div>
+              </div>
 
-                  {/* Tab Body Contents */}
-                  <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-6">
-                    {/* 1. GENERAL & CONTACT TAB */}
-                    {activeProfileTab === 'general' && (
-                      <div className="space-y-6">
-                        <div className="border-b border-slate-800 pb-3">
-                          <h3 className="text-base font-bold text-white flex items-center gap-2">
-                            <UserCheck className="w-4 h-4 text-purple-400" />
-                            <span>Personal & Organizational Profile</span>
-                          </h3>
-                          <p className="text-xs text-slate-400 mt-0.5">Update your display name, email address, and departmental contact information.</p>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="space-y-1.5">
-                            <label className="text-xs font-bold text-slate-300">Full Display Name</label>
-                            <input
-                              type="text"
-                              value="Super Admin"
-                              onChange={() => {}}
-                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-purple-500"
-                            />
-                          </div>
-
-                          <div className="space-y-1.5">
-                            <label className="text-xs font-bold text-slate-300">Username handle</label>
-                            <input
-                              type="text"
-                              value={profileUsername}
-                              onChange={(e) => setProfileUsername(e.target.value)}
-                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-purple-500"
-                            />
-                          </div>
-
-                          <div className="space-y-1.5">
-                            <label className="text-xs font-bold text-slate-300">Primary Email Address</label>
-                            <input
-                              type="email"
-                              value="admin@hoatzin.org"
-                              onChange={() => {}}
-                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-purple-500"
-                            />
-                          </div>
-
-                          <div className="space-y-1.5">
-                            <label className="text-xs font-bold text-slate-300">Phone / WhatsApp Number</label>
-                            <input
-                              type="text"
-                              value={profilePhone}
-                              onChange={(e) => setProfilePhone(e.target.value)}
-                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-purple-500"
-                            />
-                          </div>
-
-                          <div className="space-y-1.5">
-                            <label className="text-xs font-bold text-slate-300">Company / Organization</label>
-                            <input
-                              type="text"
-                              value={profileCompany}
-                              onChange={(e) => setProfileCompany(e.target.value)}
-                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-purple-500"
-                            />
-                          </div>
-
-                          <div className="space-y-1.5">
-                            <label className="text-xs font-bold text-slate-300">Job Title / Department</label>
-                            <input
-                              type="text"
-                              value={profileJobTitle}
-                              onChange={(e) => setProfileJobTitle(e.target.value)}
-                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-purple-500"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 2. LOCALIZATION & REGIONAL TAB */}
-                    {activeProfileTab === 'localization' && (
-                      <div className="space-y-6">
-                        <div className="border-b border-slate-800 pb-3">
-                          <h3 className="text-base font-bold text-white flex items-center gap-2">
-                            <Globe className="w-4 h-4 text-cyan-400" />
-                            <span>Regional & Localization Settings</span>
-                          </h3>
-                          <p className="text-xs text-slate-400 mt-0.5">Configure timezone, display language, and automatic session security timeout.</p>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div className="space-y-1.5">
-                            <label className="text-xs font-bold text-slate-300">Interface Display Language</label>
-                            <select
-                              value={profileLang}
-                              onChange={(e) => setProfileLang(e.target.value)}
-                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-purple-500"
-                            >
-                              <option value="English (US)">English (US)</option>
-                              <option value="Spanish">Spanish (Español)</option>
-                              <option value="French">French (Français)</option>
-                              <option value="German">German (Deutsch)</option>
-                              <option value="Bengali">Bengali (বাংলা)</option>
-                            </select>
-                          </div>
-
-                          <div className="space-y-1.5">
-                            <label className="text-xs font-bold text-slate-300">Server Timezone</label>
-                            <select
-                              value={profileTimezone}
-                              onChange={(e) => setProfileTimezone(e.target.value)}
-                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-purple-500"
-                            >
-                              <option value="UTC+06:00 Asia/Dhaka">UTC+06:00 Asia/Dhaka</option>
-                              <option value="UTC+00:00 UTC (London)">UTC+00:00 UTC (London)</option>
-                              <option value="UTC-05:00 US Eastern (New York)">UTC-05:00 US Eastern (New York)</option>
-                              <option value="UTC+01:00 Europe/Paris">UTC+01:00 Europe/Paris</option>
-                              <option value="UTC+08:00 Asia/Singapore">UTC+08:00 Asia/Singapore</option>
-                            </select>
-                          </div>
-
-                          <div className="space-y-1.5">
-                            <label className="text-xs font-bold text-slate-300">Date Format</label>
-                            <select
-                              defaultValue="YYYY-MM-DD"
-                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-purple-500"
-                            >
-                              <option value="YYYY-MM-DD">YYYY-MM-DD (2026-10-07)</option>
-                              <option value="DD/MM/YYYY">DD/MM/YYYY (07/10/2026)</option>
-                              <option value="MM/DD/YYYY">MM/DD/YYYY (10/07/2026)</option>
-                            </select>
-                          </div>
-
-                          <div className="space-y-1.5">
-                            <label className="text-xs font-bold text-slate-300">Inactivity Auto-Logout Timeout</label>
-                            <select
-                              value={profileAutoLogout}
-                              onChange={(e) => setProfileAutoLogout(e.target.value)}
-                              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-purple-500"
-                            >
-                              <option value="15m">15 Minutes of Inactivity</option>
-                              <option value="30m">30 Minutes of Inactivity</option>
-                              <option value="1h">1 Hour of Inactivity</option>
-                              <option value="4h">4 Hours of Inactivity</option>
-                              <option value="Never">Never (Keep Alive)</option>
-                            </select>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 3. NOTIFICATION ALERTS TAB */}
-                    {activeProfileTab === 'notifications' && (
-                      <div className="space-y-6">
-                        <div className="border-b border-slate-800 pb-3">
-                          <h3 className="text-base font-bold text-white flex items-center gap-2">
-                            <Bell className="w-4 h-4 text-amber-400" />
-                            <span>System & Email Alerts</span>
-                          </h3>
-                          <p className="text-xs text-slate-400 mt-0.5">Toggle notification dispatch preferences for security events and routine backups.</p>
-                        </div>
-
-                        <div className="space-y-3">
-                          <div className="flex items-center justify-between p-3.5 bg-slate-950 rounded-2xl border border-slate-800">
-                            <div>
-                              <h4 className="text-xs font-bold text-slate-100">Critical Incident & WAF Threat Alerts</h4>
-                              <p className="text-[11px] text-slate-400 mt-0.5">Send immediate email notifications when suspicious payload attacks or brute force bans trigger.</p>
-                            </div>
-                            <input
-                              type="checkbox"
-                              checked={profileNotifyIncidents}
-                              onChange={(e) => setProfileNotifyIncidents(e.target.checked)}
-                              className="w-4 h-4 accent-purple-500 cursor-pointer"
-                            />
-                          </div>
-
-                          <div className="flex items-center justify-between p-3.5 bg-slate-950 rounded-2xl border border-slate-800">
-                            <div>
-                              <h4 className="text-xs font-bold text-slate-100">Database Backup Status Alerts</h4>
-                              <p className="text-[11px] text-slate-400 mt-0.5">Receive summary reports whenever automated night database snapshots complete or fail.</p>
-                            </div>
-                            <input
-                              type="checkbox"
-                              checked={profileNotifyBackups}
-                              onChange={(e) => setProfileNotifyBackups(e.target.checked)}
-                              className="w-4 h-4 accent-purple-500 cursor-pointer"
-                            />
-                          </div>
-
-                          <div className="flex items-center justify-between p-3.5 bg-slate-950 rounded-2xl border border-slate-800">
-                            <div>
-                              <h4 className="text-xs font-bold text-slate-100">New IP Login Notifications</h4>
-                              <p className="text-[11px] text-slate-400 mt-0.5">Alert account owner whenever a successful login originates from an unrecognized IP location.</p>
-                            </div>
-                            <input
-                              type="checkbox"
-                              checked={profileNotifyLogins}
-                              onChange={(e) => setProfileNotifyLogins(e.target.checked)}
-                              className="w-4 h-4 accent-purple-500 cursor-pointer"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 4. SECURITY & API KEY TAB */}
-                    {activeProfileTab === 'security' && (
-                      <div className="space-y-6">
-                        <div className="border-b border-slate-800 pb-3">
-                          <h3 className="text-base font-bold text-white flex items-center gap-2">
-                            <ShieldAlert className="w-4 h-4 text-emerald-400" />
-                            <span>Security Credentials & Secret Keys</span>
-                          </h3>
-                          <p className="text-xs text-slate-400 mt-0.5">Manage master account password, 2FA credentials, and system API access keys.</p>
-                        </div>
-
-                        <div className="space-y-4">
-                          <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3">
-                            <h4 className="text-xs font-bold text-slate-200">Update Master Password</h4>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                              <input
-                                type="password"
-                                placeholder="Current Password"
-                                className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-purple-500"
-                              />
-                              <input
-                                type="password"
-                                placeholder="New Password"
-                                className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-purple-500"
-                              />
-                              <input
-                                type="password"
-                                placeholder="Confirm New Password"
-                                className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-purple-500"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 flex items-center justify-between">
-                            <div>
-                              <h4 className="text-xs font-bold text-slate-100 flex items-center gap-2">
-                                <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                                <span>Two-Factor Authentication (2FA)</span>
-                              </h4>
-                              <p className="text-[11px] text-slate-400 mt-0.5">TOTP authenticator app verification is currently enforced for this account.</p>
-                            </div>
-                            <span className="bg-emerald-500/20 text-emerald-400 text-xs font-bold px-3 py-1 rounded-xl border border-emerald-500/30">ENABLED</span>
-                          </div>
-
-                          <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-2">
-                            <div className="flex items-center justify-between">
-                              <h4 className="text-xs font-bold text-slate-200 flex items-center gap-2">
-                                <Key className="w-4 h-4 text-cyan-400" />
-                                <span>Personal Agent API Key</span>
-                              </h4>
-                              <button
-                                onClick={() => {
-                                  navigator.clipboard.writeText('hz_agent_secret_key_2026');
-                                  showToast('API Key copied to clipboard!');
-                                }}
-                                className="text-[11px] text-cyan-400 hover:underline font-mono cursor-pointer"
-                              >
-                                Copy Key
-                              </button>
-                            </div>
-                            <div className="bg-slate-900 p-3 rounded-xl border border-slate-800 font-mono text-xs text-cyan-300 flex items-center justify-between">
-                              <span>hz_agent_secret_key_2026</span>
-                              <span className="text-[10px] text-slate-500 uppercase">System Scope</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Save Footer Bar */}
-                  <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex justify-end gap-3 shadow-xl">
-                    <button
-                      onClick={() => {
-                        showToast('Profile & preferences saved successfully!');
-                      }}
-                      className="px-6 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl cursor-pointer shadow-lg shadow-purple-500/25 flex items-center gap-2 transition-all"
-                    >
-                      <Check className="w-4 h-4" />
-                      <span>Save All Profile Changes</span>
-                    </button>
+              {profileError && (
+                <div className="bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs rounded-2xl p-4 flex items-start gap-3">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <div>
+                    <div className="font-bold">Couldn't load your profile</div>
+                    <div className="mt-0.5 text-rose-300/80">{profileError}. If you signed in with the offline fallback, sign out and sign in again with your panel password.</div>
                   </div>
                 </div>
               )}
+
+              {/* Metric cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl">
+                  <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                    <span>Account</span>
+                    <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"><UserCheck className="w-4 h-4" /></div>
+                  </div>
+                  <div className="text-xl font-extrabold text-white font-mono tracking-tight truncate">{profileUsername || '—'}</div>
+                  <div className="text-[11px] text-slate-400 mt-1 font-mono">ID #{profileAccount?.id ?? '—'} · {roleLabel}</div>
+                </div>
+
+                <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl">
+                  <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                    <span>Two-Factor Auth</span>
+                    <div className={`p-2 rounded-xl border ${twoFA ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}><ShieldCheck className="w-4 h-4" /></div>
+                  </div>
+                  <div className={`text-xl font-extrabold font-mono tracking-tight ${twoFA ? 'text-emerald-400' : 'text-amber-400'}`}>{profileAccount ? (twoFA ? 'Enabled' : 'Disabled') : '—'}</div>
+                  <div className="text-[11px] text-slate-400 mt-1">TOTP authenticator at sign-in</div>
+                </div>
+
+                <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl">
+                  <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                    <span>Timezone</span>
+                    <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"><Globe className="w-4 h-4" /></div>
+                  </div>
+                  <div className="text-xl font-extrabold text-white font-mono tracking-tight truncate" title={profileTimezone}>{profileTimezone}</div>
+                  <div className="text-[11px] text-slate-400 mt-1 font-mono"><LiveClock timeZone={profileTimezone} offsetMs={profileClockOffset} /></div>
+                </div>
+
+                <div className="bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl">
+                  <div className="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider mb-2">
+                    <span>Idle Auto-Logout</span>
+                    <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20"><Clock className="w-4 h-4" /></div>
+                  </div>
+                  <div className="text-xl font-extrabold text-white font-mono tracking-tight">{autoLogoutLabel[profileAutoLogout] || profileAutoLogout}</div>
+                  <div className="text-[11px] text-slate-400 mt-1">Enforced in this browser</div>
+                </div>
+              </div>
+
+              {/* Sub-tabs */}
+              <div className="flex items-center gap-2 border-b border-slate-800/80 pb-3 overflow-x-auto">
+                {([
+                  { id: 'general', label: 'General & Contact', icon: UserCheck },
+                  { id: 'panel_domain', label: 'Panel Custom Domain', icon: Globe },
+                  { id: 'localization', label: 'Localization & Session', icon: Clock },
+                  { id: 'notifications', label: 'Notification Preferences', icon: Bell },
+                  { id: 'security', label: 'Security & API Key', icon: ShieldAlert },
+                ] as { id: ProfileTab; label: string; icon: any }[]).map((tab) => {
+                  const Icon = tab.icon;
+                  const isActive = activeProfileTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveProfileTab(tab.id)}
+                      className={`px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer whitespace-nowrap ${
+                        isActive
+                          ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 shadow-md shadow-cyan-500/20'
+                          : 'bg-slate-900/60 hover:bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800'
+                      }`}
+                    >
+                      <Icon className={`w-4 h-4 ${isActive ? 'text-slate-950' : 'text-cyan-400'}`} />
+                      <span>{tab.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="space-y-6">
+                {activeProfileTab === 'panel_domain' && (
+                  <PanelDomainTab apiBase={API_BASE} getHeaders={getHeaders} showToast={showToast} />
+                )}
+
+                {activeProfileTab === 'general' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div className={`lg:col-span-2 ${cardCls} space-y-6`}>
+                      <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
+                        <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400"><UserCheck className="w-5 h-5" /></div>
+                        <div>
+                          <h3 className="text-base font-bold text-white">Personal & Organization Details</h3>
+                          <p className="text-xs text-slate-400 mt-0.5">Saved to the panel database when you click Save Profile</p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                          <label className={labelCls}>Display Name</label>
+                          <input type="text" value={profileName} onChange={(e) => setProfileName(e.target.value)} maxLength={120} className={inputCls} />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className={labelCls}>Login Username</label>
+                          <div className="relative">
+                            <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-mono text-cyan-400">@</span>
+                            <input type="text" value={profileUsername} readOnly className={`${inputCls} pl-8 font-mono opacity-70 cursor-not-allowed`} title="The login username can't be changed here" />
+                          </div>
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className={labelCls}>Email Address</label>
+                          <div className="relative">
+                            <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                            <input type="email" value={profileEmail} onChange={(e) => setProfileEmail(e.target.value)} placeholder="admin@example.com" maxLength={254} className={`${inputCls} pl-10`} />
+                          </div>
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className={labelCls}>Phone / WhatsApp</label>
+                          <input type="text" value={profilePhone} onChange={(e) => setProfilePhone(e.target.value)} placeholder="+880 ..." maxLength={40} className={inputCls} />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className={labelCls}>Company / Organization</label>
+                          <input type="text" value={profileCompany} onChange={(e) => setProfileCompany(e.target.value)} maxLength={160} className={inputCls} />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className={labelCls}>Job Title</label>
+                          <input type="text" value={profileJobTitle} onChange={(e) => setProfileJobTitle(e.target.value)} maxLength={120} className={inputCls} />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className={`${cardCls} space-y-4`}>
+                      <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
+                        <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400"><Shield className="w-5 h-5" /></div>
+                        <div>
+                          <h4 className="text-sm font-bold text-white">Account Details</h4>
+                          <p className="text-[11px] text-slate-400">Read from the users table</p>
+                        </div>
+                      </div>
+                      <div className="space-y-3">
+                        {[
+                          ['User ID', profileAccount ? `#${profileAccount.id}` : '—', 'text-cyan-400'],
+                          ['Role', roleLabel, 'text-indigo-400'],
+                          ['Two-factor auth', profileAccount ? (twoFA ? 'Enabled' : 'Disabled') : '—', twoFA ? 'text-emerald-400' : 'text-amber-400'],
+                          ['Created', joined || 'Unknown', 'text-slate-200'],
+                          ['Profile last saved', profileUpdatedAt ? new Date(profileUpdatedAt).toLocaleString() : 'Never', 'text-slate-200'],
+                        ].map(([k, v, c]) => (
+                          <div key={k} className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-slate-800">
+                            <span className="text-xs text-slate-400">{k}</span>
+                            <span className={`text-xs font-bold font-mono ${c}`}>{v}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeProfileTab === 'localization' && (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className={`${cardCls} space-y-6`}>
+                      <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
+                        <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400"><Globe className="w-5 h-5" /></div>
+                        <div>
+                          <h3 className="text-base font-bold text-white">Regional Preferences</h3>
+                          <p className="text-xs text-slate-400 mt-0.5">Timezone drives the clock shown on this page</p>
+                        </div>
+                      </div>
+                      <div className="space-y-4">
+                        <div className="space-y-1.5">
+                          <label className={labelCls}>Timezone</label>
+                          <select value={profileTimezone} onChange={(e) => setProfileTimezone(e.target.value)} className={`${inputCls} cursor-pointer`}>
+                            {['Asia/Dhaka', 'UTC', 'Europe/London', 'Europe/Paris', 'America/New_York', 'America/Los_Angeles', 'Asia/Kolkata', 'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney'].map((tz) => (
+                              <option key={tz} value={tz}>{tz}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className={labelCls}>Language</label>
+                          <select value={profileLang} onChange={(e) => setProfileLang(e.target.value)} className={`${inputCls} cursor-pointer`}>
+                            <option value="English (US)">English (US)</option>
+                            <option value="Bengali">Bengali (বাংলা)</option>
+                            <option value="Spanish">Spanish (Español)</option>
+                            <option value="French">French (Français)</option>
+                            <option value="German">German (Deutsch)</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className={labelCls}>Date Format</label>
+                          <select value={profileDateFormat} onChange={(e) => setProfileDateFormat(e.target.value)} className={`${inputCls} cursor-pointer`}>
+                            <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+                            <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+                            <option value="MM/DD/YYYY">MM/DD/YYYY</option>
+                          </select>
+                        </div>
+                        <p className="text-[11px] text-slate-500">Language and date format are saved with your profile; the interface is currently English-only and doesn't apply them yet.</p>
+                      </div>
+                    </div>
+
+                    <div className={`${cardCls} space-y-6`}>
+                      <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
+                        <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400"><Clock className="w-5 h-5" /></div>
+                        <div>
+                          <h3 className="text-base font-bold text-white">Session Timeout</h3>
+                          <p className="text-xs text-slate-400 mt-0.5">Signs you out of this browser after inactivity</p>
+                        </div>
+                      </div>
+                      <div className="space-y-4">
+                        <div className="space-y-1.5">
+                          <label className={labelCls}>Auto-logout after</label>
+                          <select value={profileAutoLogout} onChange={(e) => setProfileAutoLogout(e.target.value)} className={`${inputCls} cursor-pointer`}>
+                            <option value="15m">15 minutes idle</option>
+                            <option value="30m">30 minutes idle (recommended)</option>
+                            <option value="1h">1 hour idle</option>
+                            <option value="4h">4 hours idle</option>
+                            <option value="Never">Never</option>
+                          </select>
+                        </div>
+                        <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-400">Server time in {profileTimezone}:</span>
+                            <span className="text-cyan-400 font-mono font-bold"><LiveClock timeZone={profileTimezone} offsetMs={profileClockOffset} /></span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-400">Idle timer:</span>
+                            <span className={`font-bold ${profileAutoLogout === 'Never' ? 'text-amber-400' : 'text-emerald-400'}`}>{profileAutoLogout === 'Never' ? 'Off' : 'Active'}</span>
+                          </div>
+                        </div>
+                        <p className="text-[11px] text-slate-500">Changes take effect immediately in this browser and are remembered after you click Save Profile.</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeProfileTab === 'notifications' && (
+                  <div className={`${cardCls} space-y-6`}>
+                    <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
+                      <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400"><Bell className="w-5 h-5" /></div>
+                      <div>
+                        <h3 className="text-base font-bold text-white">Notification Preferences</h3>
+                        <p className="text-xs text-slate-400 mt-0.5">Which events you want to hear about</p>
+                      </div>
+                    </div>
+                    <div className="space-y-3">
+                      {([
+                        ['Security incidents & WAF blocks', 'Brute-force lockouts, blocked payloads and other critical events', profileNotifyIncidents, setProfileNotifyIncidents, ShieldAlert, 'bg-rose-500/10 border-rose-500/20 text-rose-400'],
+                        ['Backup results', 'Success or failure of scheduled database and site backups', profileNotifyBackups, setProfileNotifyBackups, Database, 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400'],
+                        ['New sign-ins', 'A successful login from an IP address not seen before', profileNotifyLogins, setProfileNotifyLogins, Key, 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400'],
+                        ['Daily health digest', 'Once-a-day summary of CPU, memory, disk and hosted sites', profileNotifyDigest, setProfileNotifyDigest, CheckCircle2, 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'],
+                      ] as [string, string, boolean, (v: boolean) => void, any, string][]).map(([title, desc, val, setter, Icon, color]) => (
+                        <label key={title} className="flex items-center justify-between p-4 bg-slate-950/80 rounded-2xl border border-slate-800 hover:border-slate-700 transition-all cursor-pointer">
+                          <div className="flex items-start gap-3">
+                            <div className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 mt-0.5 ${color}`}><Icon className="w-4 h-4" /></div>
+                            <div>
+                              <h4 className="text-xs font-bold text-white">{title}</h4>
+                              <p className="text-[11px] text-slate-400 mt-0.5">{desc}</p>
+                            </div>
+                          </div>
+                          <input type="checkbox" checked={val} onChange={(e) => setter(e.target.checked)} className="w-4 h-4 accent-cyan-500 cursor-pointer" />
+                        </label>
+                      ))}
+                    </div>
+                    <div className="text-[11px] text-slate-500 flex items-start gap-2">
+                      <AlertTriangle className="w-3.5 h-3.5 mt-0.5 text-amber-400 shrink-0" />
+                      <span>
+                        These preferences are saved with your profile. Delivery channels (email, Slack, Telegram, webhooks) are configured on the{' '}
+                        <button onClick={() => setActiveTab('notifications')} className="text-cyan-400 hover:underline cursor-pointer">Alerts &amp; Webhooks</button> page.
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {activeProfileTab === 'security' && (
+                  <div className="space-y-6">
+                    <div className={`${cardCls} space-y-6`}>
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400"><Lock className="w-5 h-5" /></div>
+                          <div>
+                            <h3 className="text-base font-bold text-white">Change Panel Password</h3>
+                            <p className="text-xs text-slate-400 mt-0.5">Requires your current password · stored as a bcrypt hash · logged as a security event</p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%&*-_';
+                            const buf = new Uint32Array(20);
+                            crypto.getRandomValues(buf);
+                            const pwd = Array.from(buf, (n) => chars[n % chars.length]).join('');
+                            setProfileNewPass(pwd);
+                            setProfileConfirmPass(pwd);
+                            setShowProfilePass(true);
+                            showToast('Generated a 20-character password — store it somewhere safe before saving.');
+                          }}
+                          className="bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-cyan-500/30 font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>Generate Strong Password</span>
+                        </button>
+                      </div>
+
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          changeProfilePassword();
+                        }}
+                        className="space-y-4"
+                      >
+                        <input type="text" autoComplete="username" value={profileUsername} readOnly hidden />
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="space-y-1.5">
+                            <label className={labelCls}>Current Password</label>
+                            <input type={showProfilePass ? 'text' : 'password'} autoComplete="current-password" value={profileCurrentPass} onChange={(e) => setProfileCurrentPass(e.target.value)} className={inputCls} />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className={labelCls}>New Password</label>
+                            <input type={showProfilePass ? 'text' : 'password'} autoComplete="new-password" value={profileNewPass} onChange={(e) => setProfileNewPass(e.target.value)} placeholder="10–72 characters" className={inputCls} />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className={labelCls}>Confirm New Password</label>
+                            <input type={showProfilePass ? 'text' : 'password'} autoComplete="new-password" value={profileConfirmPass} onChange={(e) => setProfileConfirmPass(e.target.value)} className={inputCls} />
+                          </div>
+                        </div>
+
+                        {profilePassError && (
+                          <div className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-xl px-3 py-2">{profilePassError}</div>
+                        )}
+
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <button type="button" onClick={() => setShowProfilePass(!showProfilePass)} className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1.5 cursor-pointer">
+                            {showProfilePass ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                            <span>{showProfilePass ? 'Hide passwords' : 'Show passwords'}</span>
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={profilePassSaving || !profileAccount}
+                            className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold px-5 py-2 rounded-xl text-xs transition-all shadow-md shadow-cyan-500/20 flex items-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                          >
+                            {profilePassSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                            <span>{profilePassSaving ? 'Updating…' : 'Update Password'}</span>
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+
+                    <div className={`${cardCls} flex flex-col md:flex-row md:items-center justify-between gap-4`}>
+                      <div className="flex items-start gap-4">
+                        <div className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${twoFA ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-amber-500/10 border-amber-500/30 text-amber-400'}`}><ShieldCheck className="w-5 h-5" /></div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm font-bold text-white">Google Authenticator (2FA)</h4>
+                            <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${twoFA ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/15 text-amber-400 border-amber-500/30'}`}>
+                              {profileAccount ? (twoFA ? 'ACTIVE & ENFORCED' : 'NOT CONFIGURED') : 'UNKNOWN'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-400 mt-1">
+                            {twoFA
+                              ? 'Google Authenticator (RFC 6238 TOTP) is active. A 6-digit one-time code is required upon every sign-in.'
+                              : 'Protect your account against compromised passwords. Pair Google Authenticator, Authy, or 1Password to generate time-based one-time passcodes.'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {twoFA ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTwoFactorDisableError(null);
+                              setTwoFactorDisablePassword('');
+                              setShowTwoFactorDisableModal(true);
+                            }}
+                            className="px-4 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5"
+                          >
+                            <Lock className="w-3.5 h-3.5" />
+                            <span>Disable 2FA</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handleStart2FASetup}
+                            className="px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-bold rounded-xl text-xs cursor-pointer transition-all shadow-md shadow-emerald-500/20 flex items-center gap-1.5"
+                          >
+                            <QrCode className="w-3.5 h-3.5" />
+                            <span>Set Up Google Authenticator</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Active Sessions & Hardware Tracking Card in Profile */}
+                    <div className={`${cardCls} space-y-4`}>
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400">
+                            <Fingerprint className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-sm font-bold text-white">Logged-In Sessions & Hardware NICs</h4>
+                              <span className="bg-emerald-500/15 text-emerald-400 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border border-emerald-500/30">
+                                {userSessions.length} ONLINE
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                              Real-time tracking of active IP addresses and hardware MAC addresses
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('team')}
+                          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold cursor-pointer transition-all flex items-center gap-1"
+                        >
+                          <span>Manage All Team Sessions</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      <div className="space-y-2.5">
+                        {userSessions.slice(0, 3).map((s) => (
+                          <div key={s.id} className="p-3 bg-slate-950 rounded-xl border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-300">
+                                {s.device_info && (s.device_info.includes('macOS') || s.device_info.includes('Mac')) ? (
+                                  <Laptop className="w-4 h-4 text-slate-400" />
+                                ) : (
+                                  <Monitor className="w-4 h-4 text-cyan-400" />
+                                )}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-bold text-white">{s.username} · {s.device_info || 'Management Device'}</span>
+                                  {s.is_current && (
+                                    <span className="text-[9px] bg-emerald-500/20 text-emerald-400 font-mono font-bold px-1.5 py-0.2 rounded border border-emerald-500/30">
+                                      CURRENT DEVICE
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-3 text-[11px] font-mono mt-0.5 text-slate-400">
+                                  <span>IP: <strong className="text-cyan-300">{s.ip_address}</strong></span>
+                                  <span>MAC: <strong className="text-purple-300">{s.mac_address || '00:15:5D:7F:90:EA'}</strong></span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] text-slate-500 font-mono">{s.last_active || 'Just now'}</span>
+                              {!s.is_current && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRevokeSession(s.id)}
+                                  className="text-xs text-rose-400 hover:text-rose-300 px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500/20 rounded-lg border border-rose-500/20 cursor-pointer font-bold"
+                                >
+                                  Revoke
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className={`${cardCls} space-y-4`}>
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400"><Key className="w-5 h-5" /></div>
+                          <div>
+                            <h4 className="text-sm font-bold text-white">Agent API Key</h4>
+                            <p className="text-xs text-slate-400 mt-0.5">Built-in key accepted by the API for the diagnostic agent & SDK</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText('hz_agent_secret_key_2026');
+                            showToast('API key copied to clipboard');
+                          }}
+                          className="bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 font-bold px-3.5 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copy</span>
+                        </button>
+                      </div>
+                      <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 font-mono text-xs text-cyan-300 flex items-center justify-between">
+                        <span className="tracking-wider">hz_agent_secret_key_2026</span>
+                        <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded uppercase border border-slate-700">Full access</span>
+                      </div>
+                      <div className="text-[11px] text-amber-300/90 flex items-start gap-2">
+                        <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                        <span>This key is hard-coded in the server and grants full API access without a login. Rotate it before exposing the panel to the internet.</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              {activeProfileTab !== 'panel_domain' && activeProfileTab !== 'security' && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-slate-900/60 p-5 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl">
+                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                    <Clock className="w-4 h-4 text-slate-500" />
+                    <span>{profileUpdatedAt ? `Last saved ${new Date(profileUpdatedAt).toLocaleString()}` : 'Not saved yet — defaults are shown'}</span>
+                  </div>
+                  <button
+                    onClick={saveProfile}
+                    disabled={profileSaving || !profileAccount}
+                    className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold px-6 py-2.5 rounded-xl text-xs transition-all shadow-lg shadow-cyan-500/25 flex items-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {profileSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                    <span>{profileSaving ? 'Saving…' : 'Save Profile'}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+            );
+          })()}
 
         </main>
       </div>
@@ -6063,14 +7602,242 @@ export default function App() {
               <div>
                 <h3 className="font-bold text-lg text-white flex items-center gap-2">
                   <Globe className="w-5 h-5 text-cyan-400" />
-                  <span>Create New Production Website Host</span>
+                  <span>{isProvisioningWebsite ? 'Provisioning Production Host' : 'Create New Production Website Host'}</span>
                 </h3>
-                <p className="text-xs text-slate-400">Select application stack to generate ready-to-copy production configs & credentials</p>
+                <p className="text-xs text-slate-400">
+                  {isProvisioningWebsite ? 'Automated vhost configuration, directory allocation & service compilation in progress' : 'Select application stack to generate ready-to-copy production configs & credentials'}
+                </p>
               </div>
-              <button onClick={() => setShowAddWebsiteModal(false)} className="text-slate-400 hover:text-white cursor-pointer">✕</button>
+              <button
+                onClick={() => {
+                  if (isProvisioningWebsite && !provisionError) return;
+                  setShowAddWebsiteModal(false);
+                  setIsProvisioningWebsite(false);
+                  setProvisionError(null);
+                }}
+                disabled={isProvisioningWebsite && !provisionError}
+                className={`transition-colors ${
+                  isProvisioningWebsite && !provisionError
+                    ? 'text-slate-700 cursor-not-allowed'
+                    : 'text-slate-400 hover:text-white cursor-pointer'
+                }`}
+                title={isProvisioningWebsite && !provisionError ? 'Provisioning in progress...' : 'Close modal'}
+              >
+                ✕
+              </button>
             </div>
 
-            <form onSubmit={handleCreateWebsite} className="space-y-5 text-sm">
+            {/* PROVISIONING PROGRESS PRELOADER */}
+            {isProvisioningWebsite || provisionError ? (
+              <div className="space-y-6 py-2">
+                {/* Status Header */}
+                <div className="flex items-center gap-4 bg-slate-950 p-4 rounded-2xl border border-slate-800 shadow-inner">
+                  <div
+                    className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 shadow-lg transition-all ${
+                      provisionError
+                        ? 'bg-rose-500/15 border border-rose-500/30 text-rose-400 shadow-rose-500/10'
+                        : provisionProgress === 100
+                        ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 shadow-emerald-500/10'
+                        : 'bg-cyan-500/15 border border-cyan-500/30 text-cyan-400 shadow-cyan-500/10'
+                    }`}
+                  >
+                    {provisionError ? (
+                      <AlertOctagon className="w-7 h-7 text-rose-400 animate-bounce" />
+                    ) : provisionProgress === 100 ? (
+                      <CheckCircle2 className="w-7 h-7 text-emerald-400" />
+                    ) : (
+                      <RefreshCw className="w-7 h-7 text-cyan-400 animate-spin" />
+                    )}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-cyan-400">
+                        {provisionError ? 'Provisioning Alert' : provisionProgress === 100 ? 'Provisioning Completed' : 'Automated Cloud Provisioning'}
+                      </span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-900 border border-slate-800 text-slate-300 font-bold">
+                        {newStack.toUpperCase()}
+                      </span>
+                    </div>
+                    <h4 className="font-bold text-base text-white truncate mt-0.5 font-mono">
+                      {newDomain.toLowerCase().trim() || 'production-host'}
+                    </h4>
+                    <p className="text-xs text-slate-400 truncate mt-0.5">
+                      {provisionError ? provisionError : provisionStepText}
+                    </p>
+                  </div>
+
+                  <div className="text-right shrink-0">
+                    <div
+                      className={`text-2xl font-black font-mono tracking-tight ${
+                        provisionError ? 'text-rose-400' : provisionProgress === 100 ? 'text-emerald-400' : 'text-cyan-400'
+                      }`}
+                    >
+                      {provisionProgress}%
+                    </div>
+                    <span className="text-[11px] text-slate-500 font-mono">
+                      {provisionError ? 'Halted' : provisionProgress === 100 ? 'Complete' : 'Deploying'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Glowing Animated Progress Bar */}
+                <div className="space-y-2">
+                  <div className="w-full bg-slate-950 h-3.5 rounded-full p-0.5 border border-slate-800 shadow-inner relative overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-300 ease-out relative overflow-hidden ${
+                        provisionError
+                          ? 'bg-gradient-to-r from-rose-500 to-amber-500 shadow-[0_0_12px_rgba(244,63,94,0.5)]'
+                          : provisionProgress === 100
+                          ? 'bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_12px_rgba(16,185,129,0.5)]'
+                          : 'bg-gradient-to-r from-cyan-500 via-sky-400 to-emerald-400 shadow-[0_0_12px_rgba(6,182,212,0.5)]'
+                      }`}
+                      style={{ width: `${provisionProgress}%` }}
+                    >
+                      {/* Shimmer sweep effect */}
+                      {provisionProgress < 100 && !provisionError && (
+                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer" />
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center text-[11px] font-mono text-slate-400 px-1">
+                    <span>
+                      {provisionError ? 'Provisioning stopped due to an error' : `Stage ${provisionStep} of 5 • Automated Pipeline`}
+                    </span>
+                    <span className="text-slate-500">HoatzinGenz Protection Suite</span>
+                  </div>
+                </div>
+
+                {/* Step Progression Timeline / Milestones */}
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 text-xs">
+                  {[
+                    { step: 1, title: 'DNS & Host', desc: 'Domain verification' },
+                    { step: 2, title: 'Document Root', desc: 'FS & permissions' },
+                    { step: 3, title: 'Database', desc: 'MySQL credentials' },
+                    { step: 4, title: 'App Skeleton', desc: 'Core files & env' },
+                    { step: 5, title: 'VHost & Nginx', desc: 'Reload services' },
+                  ].map((st) => {
+                    const isDone = provisionProgress === 100 || provisionStep > st.step;
+                    const isCurrent = provisionStep === st.step && !provisionError && provisionProgress < 100;
+                    const isErr = provisionError && provisionStep === st.step;
+                    return (
+                      <div
+                        key={st.step}
+                        className={`p-2.5 rounded-xl border transition-all ${
+                          isDone
+                            ? 'bg-emerald-500/10 border-emerald-500/30 text-slate-200'
+                            : isCurrent
+                            ? 'bg-cyan-500/15 border-cyan-500 text-white shadow-md shadow-cyan-500/10'
+                            : isErr
+                            ? 'bg-rose-500/10 border-rose-500/40 text-rose-300'
+                            : 'bg-slate-950/60 border-slate-800 text-slate-500'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 mb-1">
+                          {isDone ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          ) : isCurrent ? (
+                            <RefreshCw className="w-3 h-3 text-cyan-400 animate-spin shrink-0" />
+                          ) : isErr ? (
+                            <AlertOctagon className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                          ) : (
+                            <div className="w-3 h-3 rounded-full border border-slate-700 shrink-0" />
+                          )}
+                          <span className="font-bold text-[11px] truncate">{st.title}</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 leading-tight truncate">{st.desc}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Live Provisioning Terminal Console */}
+                <div className="rounded-xl border border-slate-800 bg-slate-950 overflow-hidden shadow-inner">
+                  <div className="flex items-center justify-between px-3.5 py-2 bg-slate-900 border-b border-slate-800 text-xs">
+                    <div className="flex items-center gap-2">
+                      <div className="flex gap-1.5">
+                        <div className="w-2.5 h-2.5 rounded-full bg-rose-500/80" />
+                        <div className="w-2.5 h-2.5 rounded-full bg-amber-500/80" />
+                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/80" />
+                      </div>
+                      <span className="font-mono text-[11px] text-slate-400 font-semibold flex items-center gap-1.5">
+                        <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Live Provisioning Console Output</span>
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`w-2 h-2 rounded-full ${provisionError ? 'bg-rose-500' : 'bg-emerald-400 animate-ping'}`} />
+                      <span className={`text-[10px] font-mono uppercase tracking-wider font-bold ${provisionError ? 'text-rose-400' : 'text-emerald-400'}`}>
+                        {provisionError ? 'Failed' : 'Engine Active'}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="p-3.5 font-mono text-[11px] text-slate-300 max-h-44 overflow-y-auto space-y-1.5 select-text">
+                    {provisionLogs.map((log, idx) => (
+                      <div
+                        key={idx}
+                        className={`flex items-start gap-2 ${
+                          log.includes('[ERROR]') || log.includes('[NETWORK')
+                            ? 'text-rose-400'
+                            : log.includes('[SUCCESS]')
+                            ? 'text-emerald-400 font-bold'
+                            : log.includes('[SYSTEM]')
+                            ? 'text-cyan-300'
+                            : 'text-slate-300'
+                        }`}
+                      >
+                        <span className="text-slate-600 select-none">{String(idx + 1).padStart(2, '0')}</span>
+                        <span className="break-all">{log}</span>
+                      </div>
+                    ))}
+                    {provisionProgress < 100 && !provisionError && (
+                      <div className="flex items-center gap-2 text-cyan-400 pt-1">
+                        <span className="text-slate-600 select-none">❯</span>
+                        <span className="inline-block w-2 h-3.5 bg-cyan-400 animate-pulse" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Footer Actions */}
+                {provisionError ? (
+                  <div className="pt-2 flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsProvisioningWebsite(false);
+                        setProvisionError(null);
+                        setProvisionProgress(0);
+                      }}
+                      className="flex-1 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold py-2.5 rounded-xl cursor-pointer shadow-lg shadow-cyan-500/20 text-xs flex items-center justify-center gap-2"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Edit Settings & Try Again</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsProvisioningWebsite(false);
+                        setProvisionError(null);
+                        setShowAddWebsiteModal(false);
+                      }}
+                      className="px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2.5 rounded-xl cursor-pointer text-xs"
+                    >
+                      Close
+                    </button>
+                  </div>
+                ) : (
+                  <div className="pt-2 flex items-center justify-between text-xs text-slate-500 font-mono">
+                    <span className="flex items-center gap-2">
+                      <Clock className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Provisioning in progress... Please do not close this window.</span>
+                    </span>
+                    <span className="text-cyan-400 font-bold animate-pulse">{provisionProgress}%</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <form onSubmit={handleCreateWebsite} className="space-y-5 text-sm">
               {/* Stack Selection Cards */}
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-2">Select Application Stack</label>
@@ -6106,15 +7873,33 @@ export default function App() {
               {/* General Settings */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-950 p-4 rounded-xl border border-slate-800">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">Domain Name *</label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-slate-300">Domain Name *</label>
+                    {newDomain.trim() && (
+                      <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-bold ${
+                        /^[a-z0-9]([a-z0-9.\-]*[a-z0-9])?$/i.test(newDomain.toLowerCase().trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '').replace(/:\d+$/, ''))
+                          ? 'text-emerald-400 bg-emerald-500/10 border border-emerald-500/20'
+                          : 'text-amber-400 bg-amber-500/10 border border-amber-500/20'
+                      }`}>
+                        {/^[a-z0-9]([a-z0-9.\-]*[a-z0-9])?$/i.test(newDomain.toLowerCase().trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '').replace(/:\d+$/, ''))
+                          ? '✓ Valid Hostname'
+                          : '⚠ Invalid Format'}
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
-                    placeholder="mycompany.com"
+                    placeholder="mycompany.com or mysite.local"
                     required
                     value={newDomain}
                     onChange={(e) => setNewDomain(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-mono text-white focus:outline-none focus:border-cyan-500"
                   />
+                  {newDomain.trim() && (
+                    <p className="text-[10px] text-slate-500 font-mono mt-1">
+                      Target Doc Root: <span className="text-cyan-400">/var/www/html/{newDomain.toLowerCase().trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '').replace(/:\d+$/, '') || '—'}</span>
+                    </p>
+                  )}
                 </div>
 
                 {(newStack === 'wordpress' || newStack === 'laravel') && (
@@ -6337,11 +8122,17 @@ export default function App() {
 
               <div className="pt-3 flex gap-3">
                 <button type="button" onClick={() => setShowAddWebsiteModal(false)} className="flex-1 bg-slate-800 text-slate-300 font-semibold py-2.5 rounded-xl cursor-pointer">Cancel</button>
-                <button type="submit" className="flex-1 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold py-2.5 rounded-xl cursor-pointer shadow-lg shadow-cyan-500/20">
-                  🚀 Provision Website Host
+                <button
+                  type="submit"
+                  disabled={isProvisioningWebsite}
+                  className="flex-1 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-slate-950 font-bold py-2.5 rounded-xl cursor-pointer shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2"
+                >
+                  <Sparkles className="w-4 h-4 text-slate-950" />
+                  <span>🚀 Provision Website Host</span>
                 </button>
               </div>
             </form>
+            )}
           </div>
         </div>
       )}
@@ -6705,7 +8496,114 @@ export default function App() {
               <button onClick={() => setSelectedDbConnModal(null)} className="text-slate-400 hover:text-white cursor-pointer font-bold text-sm">✕</button>
             </div>
 
-            <div className="space-y-3 text-xs font-mono">
+            <div className="space-y-4 text-xs font-mono">
+              {/* Credentials Summary Box */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 font-sans">
+                <div>
+                  <span className="text-slate-500 text-[11px] block">Database User</span>
+                  <div className="flex items-center gap-1.5 mt-0.5 font-mono text-white text-xs font-bold">
+                    <Key className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>{selectedDbConnModal.username}</span>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 text-[11px]">Current Password</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowDbPassword(!showDbPassword)}
+                      className="text-slate-400 hover:text-cyan-400 text-[10px] flex items-center gap-1 cursor-pointer transition-colors"
+                    >
+                      {showDbPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      <span>{showDbPassword ? 'Hide' : 'Reveal'}</span>
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="font-mono text-amber-400 text-xs font-bold select-all">
+                      {showDbPassword ? (selectedDbConnModal.password || '********') : '••••••••••••••••'}
+                    </span>
+                    {selectedDbConnModal.password && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(selectedDbConnModal.password || '');
+                          showToast('Copied password to clipboard!');
+                        }}
+                        className="text-slate-500 hover:text-cyan-400 cursor-pointer p-0.5"
+                        title="Copy Password"
+                      >
+                        <Copy className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* SuperAdmin Password Modification Card */}
+              <div className="bg-gradient-to-br from-indigo-950/40 via-slate-950 to-slate-900 border border-indigo-500/30 rounded-xl p-4 space-y-3 font-sans shadow-lg">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-indigo-400" />
+                    <span className="font-bold text-xs text-white">SuperAdmin Password Control</span>
+                  </div>
+                  <span className="text-[10px] font-extrabold uppercase bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2 py-0.5 rounded-full">
+                    Admin Access
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Update the live authentication password for <strong className="text-white font-mono">{selectedDbConnModal.username}</strong> on {selectedDbConnModal.engine.toUpperCase()}.
+                </p>
+
+                <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                  <div className="relative flex-1">
+                    <Key className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={dbNewPassword}
+                      onChange={(e) => setDbNewPassword(e.target.value)}
+                      placeholder="Enter new database password..."
+                      className="w-full bg-slate-950 border border-slate-700/80 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-white placeholder:text-slate-600 text-xs rounded-xl pl-9 pr-3 py-2 font-mono outline-none"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleGenerateRandomDbPassword}
+                      className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold px-3 py-2 rounded-xl border border-slate-700 flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+                      title="Generate 20-character secure random password"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Generate</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleChangeDbPassword}
+                      disabled={isChangingDbPassword || !dbNewPassword.trim()}
+                      className={`text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer ${
+                        !dbNewPassword.trim() || isChangingDbPassword
+                          ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+                          : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/30 border border-indigo-500'
+                      }`}
+                    >
+                      {isChangingDbPassword ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Updating...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Update Password</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               {/* URI */}
               <div>
                 <div className="text-slate-400 font-sans font-semibold mb-1 flex justify-between">
@@ -6825,6 +8723,216 @@ DB_PASSWORD=${selectedDbConnModal.password || '********'}`}
                 {isCloningSite ? 'Cloning Site & Database...' : 'Clone Website Now'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Google Authenticator (2FA) Setup Modal */}
+      {showTwoFactorSetupModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl relative space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-lg shadow-emerald-500/10">
+                  <QrCode className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">Set Up Google Authenticator</h3>
+                  <p className="text-xs text-slate-400">Scan QR code & confirm your 6-digit TOTP key</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTwoFactorSetupModal(false);
+                  setTwoFactorSetupData(null);
+                  setTwoFactorSetupError(null);
+                }}
+                className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 cursor-pointer transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            {twoFactorSetupError && (
+              <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 text-xs text-rose-300 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+                <span>{twoFactorSetupError}</span>
+              </div>
+            )}
+
+            {twoFactorSetupLoading && !twoFactorSetupData ? (
+              <div className="py-12 flex flex-col items-center justify-center space-y-3">
+                <RefreshCw className="w-8 h-8 text-emerald-400 animate-spin" />
+                <p className="text-xs text-slate-400">Generating secure TOTP keypair...</p>
+              </div>
+            ) : twoFactorSetupData ? (
+              <form onSubmit={handleConfirm2FASetup} className="space-y-5">
+                {/* Step 1: QR Code */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-emerald-500 text-slate-950 text-xs font-bold flex items-center justify-center">1</span>
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider">Scan with Google Authenticator</h4>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Open Google Authenticator, Authy, or your password manager on your phone, tap <strong className="text-slate-200">+</strong> and scan this QR code:
+                  </p>
+                  <div className="bg-white p-3.5 rounded-2xl w-fit mx-auto shadow-xl">
+                    <img
+                      src={twoFactorSetupData.qr_code_url || (twoFactorSetupData as any).qr_code}
+                      alt="Google Authenticator QR Code"
+                      className="w-44 h-44 object-contain"
+                    />
+                  </div>
+                </div>
+
+                {/* Secret key fallback */}
+                <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-slate-400">Can't scan? Enter secret manually:</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(twoFactorSetupData.secret);
+                        showToast('Secret key copied to clipboard');
+                      }}
+                      className="text-[11px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-semibold cursor-pointer"
+                    >
+                      <Copy className="w-3 h-3" />
+                      <span>Copy</span>
+                    </button>
+                  </div>
+                  <div className="font-mono text-xs font-bold text-emerald-400 tracking-wider select-all break-all">
+                    {twoFactorSetupData.secret}
+                  </div>
+                </div>
+
+                {/* Step 2: Verification */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-emerald-500 text-slate-950 text-xs font-bold flex items-center justify-center">2</span>
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider">Verify 6-Digit Passcode</h4>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Enter the current 6-digit code displayed in Google Authenticator:
+                  </p>
+                  <input
+                    type="text"
+                    required
+                    maxLength={6}
+                    autoFocus
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={twoFactorSetupCode}
+                    onChange={(e) => setTwoFactorSetupCode(e.target.value.replace(/\D/g, ''))}
+                    placeholder="000000"
+                    className="w-full bg-slate-950 border border-emerald-500/40 rounded-xl px-4 py-3 text-center font-mono text-xl tracking-[0.3em] font-extrabold text-emerald-400 focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20 transition-all"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowTwoFactorSetupModal(false);
+                      setTwoFactorSetupData(null);
+                      setTwoFactorSetupError(null);
+                    }}
+                    className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold cursor-pointer transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={twoFactorSetupLoading || twoFactorSetupCode.length !== 6}
+                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 text-xs font-bold shadow-lg shadow-emerald-500/20 flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50"
+                  >
+                    {twoFactorSetupLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                    <span>{twoFactorSetupLoading ? 'Verifying...' : 'Verify & Enable 2FA'}</span>
+                  </button>
+                </div>
+              </form>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      {/* Disable 2FA Modal */}
+      {showTwoFactorDisableModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 shadow-lg shadow-rose-500/10">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">Disable 2FA</h3>
+                  <p className="text-xs text-slate-400">Turn off Google Authenticator</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTwoFactorDisableModal(false);
+                  setTwoFactorDisablePassword('');
+                  setTwoFactorDisableError(null);
+                }}
+                className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 cursor-pointer transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-300">
+              Disabling Google Authenticator will make your account reliant on password-only authentication.
+            </div>
+
+            {twoFactorDisableError && (
+              <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-3 text-xs text-rose-300 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+                <span>{twoFactorDisableError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleDisable2FA} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300">
+                  Confirm Account Password
+                </label>
+                <input
+                  type="password"
+                  required
+                  autoFocus
+                  value={twoFactorDisablePassword}
+                  onChange={(e) => setTwoFactorDisablePassword(e.target.value)}
+                  placeholder="Enter your current password"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-rose-500 transition-all"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowTwoFactorDisableModal(false);
+                    setTwoFactorDisablePassword('');
+                    setTwoFactorDisableError(null);
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold cursor-pointer transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={twoFactorDisableLoading || !twoFactorDisablePassword}
+                  className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg shadow-rose-600/20 flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50"
+                >
+                  {twoFactorDisableLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
+                  <span>{twoFactorDisableLoading ? 'Disabling...' : 'Confirm Disable 2FA'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

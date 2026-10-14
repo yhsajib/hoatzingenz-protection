@@ -63,7 +63,7 @@ func TestDBStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Default admin user not found: %v", err)
 	}
-	if user.PasswordHash != HashPassword("admin123") {
+	if !CheckPasswordHash("admin123", user.PasswordHash) {
 		t.Errorf("Admin password hash mismatch")
 	}
 

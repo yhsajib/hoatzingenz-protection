@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"encoding/json"
 	"os"
 	"log"
 	"os/exec"
@@ -32,7 +33,10 @@ func StartAutoHealingDaemon(v *VHostAutomationEngine, getSitesFunc func() []mode
 		for range ticker.C {
 			sites := getSitesFunc()
 			for _, site := range sites {
-				InspectAndAutoHealSite(v, site)
+				// Only run autonomous deep diagnostic analysis on websites explicitly enabled by user
+				if site.DeepDiagnosticsEnabled {
+					InspectAndAutoHealSite(v, site)
+				}
 			}
 		}
 	}()
@@ -132,4 +136,34 @@ func TailLogFile(path string, maxLines int) (string, error) {
 		lines = lines[len(lines)-maxLines:]
 	}
 	return strings.Join(lines, "\n"), nil
+}
+
+
+func SyncDiagnosticAgentConfig(sites []models.Website) error {
+	var enabledTargets []map[string]interface{}
+	for _, s := range sites {
+		if s.DeepDiagnosticsEnabled {
+			docRoot := s.DocumentRoot
+			if docRoot == "" {
+				docRoot = "/var/www/html/" + s.DomainName
+			}
+			enabledTargets = append(enabledTargets, map[string]interface{}{
+				"domain_name":   s.DomainName,
+				"document_root": docRoot,
+				"enabled":       true,
+				"updated_at":    time.Now().Format(time.RFC3339),
+			})
+		}
+	}
+
+	data, err := json.MarshalIndent(enabledTargets, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	_ = os.MkdirAll("/var/lib/hoatzingenz", 0755)
+	_ = os.WriteFile("/var/lib/hoatzingenz/diagnostic_sites.json", data, 0644)
+	_ = os.MkdirAll("/etc/diagnostic-agent", 0755)
+	_ = os.WriteFile("/etc/diagnostic-agent/enabled_sites.json", data, 0644)
+	return nil
 }

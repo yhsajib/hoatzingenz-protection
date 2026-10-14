@@ -27,7 +27,7 @@ func LoadConfig(path string) (*Config, error) {
 			SpoolDirectory: "/opt/diagnostic-agent/spool",
 			QuarantineDir:  "/opt/diagnostic-agent/quarantine",
 			AutoQuarantine: false,
-			WatchPaths:     []string{"/var/www/html"},
+			WatchPaths:     []string{},
 			WebUsers:       []string{"www-data", "nginx", "apache", "nobody"},
 		}, nil
 	}
@@ -45,7 +45,7 @@ func LoadConfig(path string) (*Config, error) {
 		SpoolDirectory: "/opt/diagnostic-agent/spool",
 		QuarantineDir:  "/opt/diagnostic-agent/quarantine",
 		AutoQuarantine: false,
-		WatchPaths:     []string{"/var/www/html"},
+		WatchPaths:     []string{},
 		WebUsers:       []string{"www-data", "nginx", "apache", "nobody"},
 	}, nil
 }

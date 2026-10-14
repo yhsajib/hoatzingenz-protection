@@ -58,13 +58,14 @@ func WAFSecurityFilter(r *http.Request) (bool, string) {
 
 	// 3. Scan POST / PUT JSON Body
 	if r.Body != nil && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
+		isSqlEndpoint := strings.HasSuffix(r.URL.Path, "/database/restore") || strings.HasSuffix(r.URL.Path, "/database/query")
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err == nil && len(bodyBytes) > 0 {
 			// Restore request body for downstream handlers
 			r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 			bodyStr := string(bodyBytes)
 
-			if sqliRegex.MatchString(bodyStr) {
+			if !isSqlEndpoint && sqliRegex.MatchString(bodyStr) {
 				return true, "SQL Injection payload detected in request body"
 			}
 			if xssRegex.MatchString(bodyStr) {
@@ -135,7 +136,27 @@ func (h *APIHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// 2. Check X-Agent-Key or X-API-Key for daemon & SDK telemetry calls
+		// 2. Check Bearer (preferred: carries user identity) Token in Authorization header
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+			tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+			claims, err := services.ValidateToken(tokenStr)
+			if err == nil {
+				tokenHash := services.HashToken(tokenStr)
+				if h.DBStore != nil && h.DBStore.IsSessionRevoked(tokenHash) {
+					writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Session terminated: This session has been revoked by an administrator."})
+					return
+				}
+				if h.DBStore != nil {
+					h.DBStore.TouchSession(tokenHash)
+				}
+				ctx := context.WithValue(r.Context(), UserContextKey, claims)
+				next(w, r.WithContext(ctx))
+				return
+			}
+		}
+
+		// 3. Check X-Agent-Key or X-API-Key for daemon & SDK telemetry calls
 		apiKey := r.Header.Get("X-Agent-Key")
 		if apiKey == "" {
 			apiKey = r.Header.Get("X-API-Key")
@@ -154,21 +175,6 @@ func (h *APIHandler) AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			}
 		}
 
-		// 3. Check Bearer Token in Authorization header
-		authHeader := r.Header.Get("Authorization")
-		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
-			tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
-			if strings.HasPrefix(tokenStr, "hz_session_") || tokenStr == "hz_session_jwt_token_2026" || tokenStr == "demo_token_123" || tokenStr == "hz_demo_token" || tokenStr == "hz_agent_secret_key_2026" {
-				next(w, r)
-				return
-			}
-			claims, err := services.ValidateToken(tokenStr)
-			if err == nil {
-				ctx := context.WithValue(r.Context(), UserContextKey, claims)
-				next(w, r.WithContext(ctx))
-				return
-			}
-		}
 
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized: Missing or invalid authentication token"})
 	}

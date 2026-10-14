@@ -35,15 +35,18 @@ export const EmailWebmailTab: React.FC<EmailWebmailTabProps> = ({
   apiBase,
   showToast,
 }) => {
+  const [activeSubTab, setActiveSubTab] = useState<'email' | 'domains'>('email');
   const [mailboxSearch, setMailboxSearch] = useState<string>('');
+  const [domainSearch, setDomainSearch] = useState<string>('');
+  const [selectedDomainFilter, setSelectedDomainFilter] = useState<string>('all');
   const [showAddMailDomainModal, setShowAddMailDomainModal] = useState<boolean>(false);
   const [showAddMailboxModal, setShowAddMailboxModal] = useState<boolean>(false);
   const [showDnsRecordsModal, setShowDnsRecordsModal] = useState<boolean>(false);
-  const [selectedDnsDomain, setSelectedDnsDomain] = useState<string>(mailDomains[0]?.name || 'hoatzinlabs.com');
+  const [selectedDnsDomain, setSelectedDnsDomain] = useState<string>(mailDomains[0]?.name || '');
   const [copiedDnsKey, setCopiedDnsKey] = useState<string | null>(null);
 
   const [newMailDomainInput, setNewMailDomainInput] = useState<string>('');
-  const [newMailboxDomain, setNewMailboxDomain] = useState<string>(mailDomains[0]?.name || 'hoatzinlabs.com');
+  const [newMailboxDomain, setNewMailboxDomain] = useState<string>(mailDomains[0]?.name || '');
   const [newMailboxLocalPart, setNewMailboxLocalPart] = useState<string>('');
   const [newMailboxPassword, setNewMailboxPassword] = useState<string>('');
   const [newMailboxQuota, setNewMailboxQuota] = useState<number>(2048);
@@ -51,8 +54,14 @@ export const EmailWebmailTab: React.FC<EmailWebmailTabProps> = ({
   const totalQuotaMB = mailboxes.reduce((acc, mb) => acc + (mb.quota_mb || 2048), 0);
   const totalQuotaGB = (totalQuotaMB / 1024).toFixed(1);
 
-  const filteredMailboxes = mailboxes.filter((mb) =>
-    !mailboxSearch || mb.address.toLowerCase().includes(mailboxSearch.toLowerCase())
+  const filteredMailboxes = mailboxes.filter((mb) => {
+    const matchesSearch = !mailboxSearch || mb.address.toLowerCase().includes(mailboxSearch.toLowerCase());
+    const matchesDomain = selectedDomainFilter === 'all' || mb.address.endsWith('@' + selectedDomainFilter);
+    return matchesSearch && matchesDomain;
+  });
+
+  const filteredDomains = mailDomains.filter((d) =>
+    !domainSearch || d.name.toLowerCase().includes(domainSearch.toLowerCase())
   );
 
   const copyToClipboard = (text: string, key: string) => {
@@ -174,7 +183,10 @@ export const EmailWebmailTab: React.FC<EmailWebmailTabProps> = ({
 
         <div className="flex items-center gap-3 shrink-0">
           <button
-            onClick={() => setShowAddMailDomainModal(true)}
+            onClick={() => {
+              setActiveSubTab('domains');
+              setShowAddMailDomainModal(true);
+            }}
             className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold px-4 py-2.5 rounded-xl text-xs border border-slate-700 transition-all cursor-pointer flex items-center gap-2 shadow-sm hover:border-slate-600"
           >
             <Globe className="w-4 h-4 text-cyan-400" />
@@ -185,6 +197,7 @@ export const EmailWebmailTab: React.FC<EmailWebmailTabProps> = ({
               if (mailDomains.length > 0 && !newMailboxDomain) {
                 setNewMailboxDomain(mailDomains[0].name);
               }
+              setActiveSubTab('email');
               setShowAddMailboxModal(true);
             }}
             className="bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-400 hover:to-indigo-500 text-white font-bold px-4 py-2.5 rounded-xl text-xs transition-all shadow-lg shadow-purple-500/25 flex items-center gap-2 cursor-pointer"
@@ -267,7 +280,11 @@ export const EmailWebmailTab: React.FC<EmailWebmailTabProps> = ({
         </div>
 
         {/* Storage Allocation */}
-        <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl space-y-3 shadow-xl hover:border-slate-700/80 transition-all">
+        <div
+          onClick={() => setActiveSubTab('email')}
+          className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl space-y-3 shadow-xl hover:border-purple-500/30 transition-all cursor-pointer group"
+          title="Click to view Email Accounts"
+        >
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Mailboxes & Storage</span>
             <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-bold">
@@ -286,8 +303,69 @@ export const EmailWebmailTab: React.FC<EmailWebmailTabProps> = ({
         </div>
       </div>
 
-      {/* ACTIVE MAILBOXES TABLE */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
+      {/* SUB-TABS NAVIGATION: EMAIL & DOMAIN */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/70 p-2 rounded-2xl border border-slate-800/80 backdrop-blur-xl shadow-xl">
+        <div className="flex items-center gap-2 p-1 bg-slate-950/70 border border-slate-800/60 rounded-xl">
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('email')}
+            className={`flex items-center gap-2.5 px-4 sm:px-5 py-2.5 rounded-lg font-bold text-xs transition-all duration-200 cursor-pointer ${
+              activeSubTab === 'email'
+                ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-500/25 border border-purple-500/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Mail className={`w-4 h-4 ${activeSubTab === 'email' ? 'text-white' : 'text-purple-400'}`} />
+            <span>Email Accounts</span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors ${
+                activeSubTab === 'email'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-slate-800 text-slate-400'
+              }`}
+            >
+              {mailboxes.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('domains')}
+            className={`flex items-center gap-2.5 px-4 sm:px-5 py-2.5 rounded-lg font-bold text-xs transition-all duration-200 cursor-pointer ${
+              activeSubTab === 'domains'
+                ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-lg shadow-cyan-500/25 border border-cyan-500/30'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <Globe className={`w-4 h-4 ${activeSubTab === 'domains' ? 'text-white' : 'text-cyan-400'}`} />
+            <span>Mail Domains</span>
+            <span
+              className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold transition-colors ${
+                activeSubTab === 'domains'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-slate-800 text-slate-400'
+              }`}
+            >
+              {mailDomains.length}
+            </span>
+          </button>
+        </div>
+
+        <div className="flex items-center gap-3 px-2">
+          <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
+            <span className={`w-2 h-2 rounded-full ${activeSubTab === 'email' ? 'bg-purple-400 animate-pulse' : 'bg-cyan-400 animate-pulse'}`}></span>
+            <span>
+              {activeSubTab === 'email'
+                ? `${mailboxes.length} active mailbox${mailboxes.length === 1 ? '' : 'es'} configured`
+                : `${mailDomains.length} mail domain${mailDomains.length === 1 ? '' : 's'} verified`}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* TAB 1: VIRTUAL MAIL ACCOUNTS */}
+      {activeSubTab === 'email' && (
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl animate-fade-in">
         <div className="p-5 border-b border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-950/40">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400">
@@ -302,7 +380,19 @@ export const EmailWebmailTab: React.FC<EmailWebmailTabProps> = ({
             </span>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            {mailDomains.length > 1 && (
+              <select
+                value={selectedDomainFilter}
+                onChange={(e) => setSelectedDomainFilter(e.target.value)}
+                className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-mono cursor-pointer"
+              >
+                <option value="all">All Domains ({mailDomains.length})</option>
+                {mailDomains.map((d) => (
+                  <option key={d.id} value={d.name}>@{d.name}</option>
+                ))}
+              </select>
+            )}
             <div className="relative">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
@@ -355,7 +445,7 @@ export const EmailWebmailTab: React.FC<EmailWebmailTabProps> = ({
                 </tr>
               ) : (
                 filteredMailboxes.map((mb) => {
-                  const domain = mb.address.split('@')[1] || 'hoatzinlabs.com';
+                  const domain = mb.address.split('@')[1] || '';
                   return (
                     <tr key={mb.id} className="hover:bg-slate-800/40 transition-colors group">
                       <td className="py-4 px-5">
@@ -450,9 +540,11 @@ export const EmailWebmailTab: React.FC<EmailWebmailTabProps> = ({
           </table>
         </div>
       </div>
+      )}
 
-      {/* MAIL DOMAINS & DNS SECURITY TABLE */}
-      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
+      {/* TAB 2: MAIL DOMAINS & DELIVERABILITY */}
+      {activeSubTab === 'domains' && (
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl animate-fade-in">
         <div className="p-5 border-b border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-950/40">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
@@ -467,13 +559,25 @@ export const EmailWebmailTab: React.FC<EmailWebmailTabProps> = ({
             </span>
           </div>
 
-          <button
-            onClick={() => setShowAddMailDomainModal(true)}
-            className="bg-slate-800 hover:bg-slate-750 text-slate-200 font-semibold px-3.5 py-2 rounded-xl text-xs border border-slate-700 transition-all flex items-center gap-1.5 cursor-pointer shadow-sm hover:border-slate-600"
-          >
-            <Plus className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Add Mail Domain</span>
-          </button>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Search domains..."
+                value={domainSearch}
+                onChange={(e) => setDomainSearch(e.target.value)}
+                className="bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 w-48 sm:w-64 transition-all font-mono"
+              />
+            </div>
+            <button
+              onClick={() => setShowAddMailDomainModal(true)}
+              className="bg-cyan-600 hover:bg-cyan-500 text-white font-semibold px-3.5 py-2 rounded-xl text-xs border border-cyan-500/40 transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-cyan-600/20"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Mail Domain</span>
+            </button>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -488,7 +592,20 @@ export const EmailWebmailTab: React.FC<EmailWebmailTabProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 text-xs">
-              {mailDomains.map((d) => {
+              {filteredDomains.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="py-12 text-center text-slate-400">
+                    <div className="flex flex-col items-center justify-center gap-3">
+                      <div className="w-12 h-12 rounded-2xl bg-slate-800/50 border border-slate-700/50 flex items-center justify-center text-slate-500">
+                        <Globe className="w-6 h-6" />
+                      </div>
+                      <p className="text-sm font-medium text-slate-300">No mail domains found</p>
+                      <p className="text-xs text-slate-500">Click &quot;Add Mail Domain&quot; to configure your first domain.</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                filteredDomains.map((d) => {
                 const boxCount = mailboxes.filter((mb) => mb.address.endsWith('@' + d.name)).length;
                 return (
                   <tr key={d.id} className="hover:bg-slate-800/40 transition-colors group">
@@ -564,11 +681,12 @@ export const EmailWebmailTab: React.FC<EmailWebmailTabProps> = ({
                     </td>
                   </tr>
                 );
-              })}
+              }))}
             </tbody>
           </table>
         </div>
       </div>
+      )}
 
       {/* ADD MAIL DOMAIN MODAL */}
       {showAddMailDomainModal && (
