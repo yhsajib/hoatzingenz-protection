@@ -663,7 +663,97 @@ if __name__ == '__main__':
 		}
 	}
 
+	if site.SiteType == "wordpress" {
+		v.AutoInstallWordPress(site, logf)
+	}
+
 	return steps, nil
+}
+
+// AutoInstallWordPress executes automated installation of WordPress so it is immediately ready for login
+func (v *VHostAutomationEngine) AutoInstallWordPress(site *models.Website, logf func(string, ...interface{})) {
+	if site.SiteType != "wordpress" {
+		return
+	}
+
+	adminUser := strings.TrimSpace(site.AdminUser)
+	if adminUser == "" {
+		adminUser = "admin_wp"
+	}
+	adminPass := strings.TrimSpace(site.AdminPass)
+	if adminPass == "" {
+		adminPass = "WpPass#2026!Sec"
+	}
+	adminEmail := strings.TrimSpace(site.AdminEmail)
+	if adminEmail == "" {
+		adminEmail = "admin@" + site.DomainName
+	}
+	siteTitle := strings.TrimSpace(site.SiteTitle)
+	if siteTitle == "" {
+		siteTitle = site.DomainName
+	}
+	siteURL := "http://" + site.DomainName
+
+	logf("Executing automated WordPress installation with user '%s'...", adminUser)
+
+	wpBin, err := exec.LookPath("wp")
+	if err == nil {
+		out, err := runCmd(2*time.Minute, wpBin,
+			"core", "install",
+			"--path="+site.DocumentRoot,
+			"--url="+siteURL,
+			"--title="+siteTitle,
+			"--admin_user="+adminUser,
+			"--admin_password="+adminPass,
+			"--admin_email="+adminEmail,
+			"--skip-email",
+			"--allow-root",
+		)
+		if err == nil || strings.Contains(out, "already installed") {
+			// Ensure admin user exists and has specified credentials
+			_, errUser := runCmd(30*time.Second, wpBin, "user", "get", adminUser, "--path="+site.DocumentRoot, "--allow-root")
+			if errUser != nil {
+				_, _ = runCmd(30*time.Second, wpBin, "user", "create", adminUser, adminEmail, "--user_pass="+adminPass, "--role=administrator", "--path="+site.DocumentRoot, "--allow-root")
+			} else {
+				_, _ = runCmd(30*time.Second, wpBin, "user", "update", adminUser, "--user_pass="+adminPass, "--user_email="+adminEmail, "--path="+site.DocumentRoot, "--allow-root")
+			}
+			if siteTitle != "" {
+				_, _ = runCmd(30*time.Second, wpBin, "option", "update", "blogname", siteTitle, "--path="+site.DocumentRoot, "--allow-root")
+			}
+			logf("WordPress automated installation complete. Ready for instant login with username '%s'!", adminUser)
+			_, _ = runCmd(time.Minute, "chown", "-R", "www-data:www-data", site.DocumentRoot)
+			return
+		}
+	}
+
+	// Fallback via PHP execution of wp_install()
+	phpScript := fmt.Sprintf(`<?php
+define('WP_INSTALLING', true);
+$root = '%s';
+if (file_exists($root . '/wp-load.php') && file_exists($root . '/wp-admin/includes/upgrade.php')) {
+    require_once $root . '/wp-load.php';
+    require_once $root . '/wp-admin/includes/upgrade.php';
+    if (!is_blog_installed()) {
+        wp_install('%s', '%s', '%s', true, '', '%s');
+        update_option('siteurl', '%s');
+        update_option('home', '%s');
+        echo "WP_INSTALLED_OK";
+    }
+}
+`,
+		site.DocumentRoot,
+		phpEscape(siteTitle), phpEscape(adminUser), phpEscape(adminEmail), phpEscape(adminPass),
+		siteURL, siteURL,
+	)
+
+	scriptPath := filepath.Join(site.DocumentRoot, "wp-auto-installer.php")
+	if err := os.WriteFile(scriptPath, []byte(phpScript), 0644); err == nil {
+		_, _ = runCmd(2*time.Minute, "php", scriptPath)
+		_ = os.Remove(scriptPath)
+		logf("WordPress installed via internal PHP engine with user '%s'!", adminUser)
+	}
+
+	_, _ = runCmd(time.Minute, "chown", "-R", "www-data:www-data", site.DocumentRoot)
 }
 func (v *VHostAutomationEngine) Deprovision(site models.Website, removeFiles, dropDB bool) []string {
 	var steps []string

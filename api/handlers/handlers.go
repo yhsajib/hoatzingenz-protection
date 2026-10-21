@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1686,20 +1687,53 @@ func (h *APIHandler) HandleEmail(w http.ResponseWriter, r *http.Request) {
 
 
 
+var cookiePathRe = regexp.MustCompile(`(?i)\bpath\s*=\s*/`)
+
+// rewritePreviewLocation rewrites backend redirect URLs to keep them within the /sites/{domain}/ prefix
+func rewritePreviewLocation(loc, domain string) string {
+	if loc == "" {
+		return loc
+	}
+	for _, prefix := range []string{
+		"http://" + domain + ":80",
+		"https://" + domain + ":443",
+		"http://" + domain,
+		"https://" + domain,
+		"//" + domain,
+	} {
+		if strings.HasPrefix(loc, prefix) {
+			loc = strings.TrimPrefix(loc, prefix)
+			break
+		}
+	}
+	if !strings.HasPrefix(loc, "/sites/") {
+		if !strings.HasPrefix(loc, "/") {
+			loc = "/" + loc
+		}
+		loc = "/sites/" + domain + loc
+	}
+	return loc
+}
+
 // HandleSitePreview serves site document root files for local preview (e.g. /sites/{domain}/)
 func (h *APIHandler) HandleSitePreview(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/sites/")
-	path = strings.Trim(path, "/")
-	if path == "" {
+	rawPath := strings.TrimPrefix(r.URL.Path, "/sites/")
+	if rawPath == "" {
 		http.Error(w, "Site domain missing", http.StatusBadRequest)
 		return
 	}
 
-	parts := strings.SplitN(path, "/", 2)
-	domain := parts[0]
-	subPath := ""
-	if len(parts) > 1 {
-		subPath = parts[1]
+	var domain, subPath string
+	slashIdx := strings.Index(rawPath, "/")
+	if slashIdx == -1 {
+		domain = rawPath
+		subPath = "/"
+	} else {
+		domain = rawPath[:slashIdx]
+		subPath = rawPath[slashIdx:]
+	}
+	if subPath == "" {
+		subPath = "/"
 	}
 
 	var siteStatus string
@@ -1750,6 +1784,96 @@ func (h *APIHandler) HandleSitePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 1. Attempt reverse proxying to local Nginx on 127.0.0.1:80
+	// This delegates directly to Nginx + PHP-FPM FastCGI pool for 100% full WordPress functionality
+	nginxURL := "http://127.0.0.1:80" + subPath
+	if r.URL.RawQuery != "" {
+		nginxURL += "?" + r.URL.RawQuery
+	}
+
+	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, nginxURL, r.Body)
+	if err == nil {
+		for k, vv := range r.Header {
+			for _, v := range vv {
+				proxyReq.Header.Add(k, v)
+			}
+		}
+		proxyReq.Host = domain
+		proxyReq.Header.Set("Host", domain)
+		proxyReq.Header.Set("X-Forwarded-Host", r.Host)
+		proxyReq.Header.Set("X-Forwarded-Proto", "http")
+		proxyReq.Header.Set("X-Forwarded-Prefix", "/sites/"+domain)
+		proxyReq.Header.Del("Accept-Encoding")
+
+		client := &http.Client{
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+			Timeout: 60 * time.Second,
+		}
+
+		resp, err := client.Do(proxyReq)
+		if err == nil {
+			defer resp.Body.Close()
+
+			for k, vv := range resp.Header {
+				if strings.EqualFold(k, "Content-Length") {
+					continue
+				}
+				for _, v := range vv {
+					if strings.EqualFold(k, "Location") {
+						w.Header().Set("Location", rewritePreviewLocation(v, domain))
+					} else if strings.EqualFold(k, "Set-Cookie") {
+						cleaned := strings.ReplaceAll(v, "Domain="+domain, "")
+						cleaned = strings.ReplaceAll(cleaned, "domain="+domain, "")
+						cleaned = cookiePathRe.ReplaceAllString(cleaned, "path=/sites/"+domain+"/")
+						w.Header().Add("Set-Cookie", cleaned)
+					} else {
+						w.Header().Add(k, v)
+					}
+				}
+			}
+
+			loc := resp.Header.Get("Location")
+			if loc != "" {
+				w.Header().Set("Location", rewritePreviewLocation(loc, domain))
+				w.WriteHeader(resp.StatusCode)
+				return
+			}
+
+			ct := resp.Header.Get("Content-Type")
+			if strings.Contains(ct, "text/html") || strings.Contains(ct, "application/xhtml+xml") {
+				bodyBytes, readErr := io.ReadAll(resp.Body)
+				if readErr == nil {
+					bodyStr := string(bodyBytes)
+					bodyStr = strings.ReplaceAll(bodyStr, "http://"+domain+":80/", "/sites/"+domain+"/")
+					bodyStr = strings.ReplaceAll(bodyStr, "http://"+domain+"/", "/sites/"+domain+"/")
+					bodyStr = strings.ReplaceAll(bodyStr, "https://"+domain+":443/", "/sites/"+domain+"/")
+					bodyStr = strings.ReplaceAll(bodyStr, "https://"+domain+"/", "/sites/"+domain+"/")
+					escapedSlash := "\\/"
+					bodyStr = strings.ReplaceAll(bodyStr, "http:" + escapedSlash + escapedSlash + domain + escapedSlash, escapedSlash + "sites" + escapedSlash + domain + escapedSlash)
+					bodyStr = strings.ReplaceAll(bodyStr, "https:" + escapedSlash + escapedSlash + domain + escapedSlash, escapedSlash + "sites" + escapedSlash + domain + escapedSlash)
+					bodyStr = strings.ReplaceAll(bodyStr, "//"+domain+"/", "/sites/"+domain+"/")
+					bodyStr = strings.ReplaceAll(bodyStr, "http://"+domain, "/sites/"+domain)
+					bodyStr = strings.ReplaceAll(bodyStr, "https://"+domain, "/sites/"+domain)
+
+					w.Header().Set("Content-Length", strconv.Itoa(len(bodyStr)))
+					w.WriteHeader(resp.StatusCode)
+					w.Write([]byte(bodyStr))
+					return
+				}
+			}
+
+			if cl := resp.Header.Get("Content-Length"); cl != "" {
+				w.Header().Set("Content-Length", cl)
+			}
+			w.WriteHeader(resp.StatusCode)
+			io.Copy(w, resp.Body)
+			return
+		}
+	}
+
+	// 2. Fallback: Direct filesystem and CLI runner
 	docRoot := services.SiteRootDir(domain)
 	if _, err := os.Stat(docRoot); os.IsNotExist(err) {
 		localFallback := filepath.Join("./data/sites", domain)
@@ -1761,7 +1885,8 @@ func (h *APIHandler) HandleSitePreview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	target := filepath.Join(docRoot, subPath)
+	cleanSub := strings.Trim(subPath, "/")
+	target := filepath.Join(docRoot, cleanSub)
 	if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(docRoot)) {
 		http.Error(w, "Access denied", http.StatusForbidden)
 		return
@@ -1769,7 +1894,6 @@ func (h *APIHandler) HandleSitePreview(w http.ResponseWriter, r *http.Request) {
 
 	info, err := os.Stat(target)
 	if err != nil {
-		// Fallback to index.html if requested asset not directly found
 		if _, err2 := os.Stat(filepath.Join(docRoot, "index.html")); err2 == nil {
 			target = filepath.Join(docRoot, "index.html")
 			info, _ = os.Stat(target)
@@ -1780,12 +1904,18 @@ func (h *APIHandler) HandleSitePreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if info.IsDir() {
+		if strings.HasSuffix(cleanSub, "wp-admin") || cleanSub == "wp-admin" {
+			if _, err := os.Stat(filepath.Join(target, "install.php")); err == nil {
+				http.Redirect(w, r, "/sites/"+domain+"/wp-admin/install.php", http.StatusFound)
+				return
+			}
+		}
+
 		indexCandidates := []string{
 			filepath.Join(target, "index.php"),
 			filepath.Join(target, "public", "index.php"),
 			filepath.Join(target, "index.html"),
 			filepath.Join(target, "public", "index.html"),
-			filepath.Join(target, "readme.html"),
 		}
 		foundIndex := ""
 		for _, c := range indexCandidates {
@@ -1808,12 +1938,19 @@ func (h *APIHandler) HandleSitePreview(w http.ResponseWriter, r *http.Request) {
 		if phpPath, err := exec.LookPath("php"); err == nil {
 			cmd := exec.Command(phpPath, target)
 			cmd.Dir = filepath.Dir(target)
+			if r.Body != nil && (r.Method == http.MethodPost || r.Method == http.MethodPut) {
+				cmd.Stdin = r.Body
+			}
 			cmd.Env = append(os.Environ(),
 				"DOCUMENT_ROOT="+docRoot,
 				"SCRIPT_FILENAME="+target,
 				"HTTP_HOST="+r.Host,
 				"SERVER_NAME="+domain,
-				"REQUEST_URI="+r.URL.Path,
+				"REQUEST_URI="+r.URL.RequestURI(),
+				"REQUEST_METHOD="+r.Method,
+				"QUERY_STRING="+r.URL.RawQuery,
+				"CONTENT_TYPE="+r.Header.Get("Content-Type"),
+				"CONTENT_LENGTH="+r.Header.Get("Content-Length"),
 				"REDIRECT_STATUS=200",
 			)
 			out, err := cmd.CombinedOutput()
@@ -1827,8 +1964,7 @@ func (h *APIHandler) HandleSitePreview(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Fallback: If PHP CLI has fatal error or permission issue, serve index.html / readme.html if present
-		for _, alt := range []string{filepath.Join(docRoot, "index.html"), filepath.Join(docRoot, "public", "index.html"), filepath.Join(docRoot, "readme.html")} {
+		for _, alt := range []string{filepath.Join(docRoot, "index.html"), filepath.Join(docRoot, "public", "index.html")} {
 			if _, err := os.Stat(alt); err == nil {
 				http.ServeFile(w, r, alt)
 				return
